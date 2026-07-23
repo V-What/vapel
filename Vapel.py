@@ -29,9 +29,17 @@ ESP_FONT_NAME = "Segoe UI"
 ESP_FONT_SIZE = 14
 ESP_FONT_BOLD = True
 ESP_LABEL_WIDTH = 120
-ESP_LABEL_HEIGHT = 40
 ESP_NAME_COLOR = (255, 255, 255)  # nom toujours blanc
 ESP_NEUTRAL_COLOR = (200, 200, 200)  # ligne PV/distance quand les PV sont masques
+ESP_CHAKRA_COLOR = (66, 177, 255)
+ESP_ROW_HEIGHT = 18  # hauteur en px de chaque ligne (nom compris)
+
+# Lissage des positions ecran : meme a 60 envois/sec, le bruit de calcul cote
+# Lua (physique, WorldToScreenPoint) fait micro-trembler le texte. On rapproche
+# la position affichee de la position brute par ce ratio a chaque frame de
+# rendu au lieu de sauter dessus directement. Plus bas = plus stable mais plus
+# de retard visuel sur les mouvements rapides ; plus haut = plus reactif.
+ESP_POSITION_SMOOTHING = 0.8
 
 # Seuils de %HP (decroissants) -> couleur. Le premier seuil depasse gagne.
 HEALTH_COLORS = (
@@ -57,6 +65,9 @@ class Overlay:
         self.enabled = False  # pilote depuis le menu in-game (light_chat.lua)
         self.show_health = True
         self.show_distance = False
+        self.show_chakra = False
+        self.show_blood = False
+        self._smoothed_pos = {}  # nom -> (x, y) lisse, mis a jour dans _tick
         self._register_class()
         self._create_window()
 
@@ -110,12 +121,33 @@ class Overlay:
         self.enabled = bool(data.get("enabled", False))
         self.show_health = bool(data.get("showHealth", True))
         self.show_distance = bool(data.get("showDistance", False))
+        self.show_chakra = bool(data.get("showChakra", False))
+        self.show_blood = bool(data.get("showBlood", False))
         self.players = data.get("players", [])
 
     def _tick(self):
         self._sync_position()
+        self._update_smoothing()
         win32gui.InvalidateRect(self.hwnd, None, False)
         win32gui.UpdateWindow(self.hwnd)  # force le WM_PAINT immediatement (pas via la queue)
+
+    def _update_smoothing(self):
+        seen = set()
+        for p in self.players:
+            name = p["name"]
+            seen.add(name)
+            target = (p["x"], p["y"])
+            prev = self._smoothed_pos.get(name)
+            if prev is None:
+                self._smoothed_pos[name] = target
+            else:
+                self._smoothed_pos[name] = (
+                    prev[0] + (target[0] - prev[0]) * ESP_POSITION_SMOOTHING,
+                    prev[1] + (target[1] - prev[1]) * ESP_POSITION_SMOOTHING,
+                )
+        for name in list(self._smoothed_pos):
+            if name not in seen:
+                del self._smoothed_pos[name]
 
     def _sync_position(self):
         roblox_hwnd = win32gui.FindWindow(ROBLOX_WINDOW_CLASS, None)
@@ -152,33 +184,32 @@ class Overlay:
 
         if self.enabled:
             win32gui.SetBkMode(mem_dc, win32con.TRANSPARENT)
-            half_w, half_h = ESP_LABEL_WIDTH // 2, ESP_LABEL_HEIGHT // 2
+            half_w = ESP_LABEL_WIDTH // 2
             for p in self.players:
-                x, y = int(p["x"]), int(p["y"])
+                sx, sy = self._smoothed_pos.get(p["name"], (p["x"], p["y"]))
+                x, y = int(sx), int(sy)
 
-                win32gui.SetTextColor(mem_dc, win32api.RGB(*ESP_NAME_COLOR))
-                win32gui.DrawText(
-                    mem_dc, p["name"], -1,
-                    (x - half_w, y - half_h, x + half_w, y - half_h + 18),
-                    win32con.DT_CENTER,
-                )
-
-                info_parts = []
+                # Une ligne par info active (nom toujours en premier), empilees
+                # sans trou pour les lignes masquees ou sans donnee - meme ordre
+                # que le mode Lua : PV, Distance, Chakra, Blood.
+                rows = [(p["name"], ESP_NAME_COLOR)]
                 if self.show_health:
-                    info_parts.append("{}/{}".format(p["hp"], p["maxHp"]))
+                    pct = p["hp"] / max(p["maxHp"], 1)
+                    rows.append(("{}/{}".format(p["hp"], p["maxHp"]), health_color(pct)))
                 if self.show_distance and p.get("dist") is not None:
-                    info_parts.append("{}m".format(p["dist"]))
+                    rows.append(("{}m".format(p["dist"]), ESP_NEUTRAL_COLOR))
+                if self.show_chakra and p.get("chakra") is not None and p.get("maxChakra") is not None:
+                    rows.append(("{}/{} Chakra".format(p["chakra"], p["maxChakra"]), ESP_CHAKRA_COLOR))
+                if self.show_blood and p.get("blood") is not None:
+                    rows.append(("{}%".format(p["blood"]), ESP_NEUTRAL_COLOR))
 
-                if info_parts:
-                    if self.show_health:
-                        pct = p["hp"] / max(p["maxHp"], 1)
-                        color = health_color(pct)
-                    else:
-                        color = ESP_NEUTRAL_COLOR
+                top = y - (len(rows) * ESP_ROW_HEIGHT) // 2
+                for i, (text, color) in enumerate(rows):
                     win32gui.SetTextColor(mem_dc, win32api.RGB(*color))
+                    row_top = top + i * ESP_ROW_HEIGHT
                     win32gui.DrawText(
-                        mem_dc, " | ".join(info_parts), -1,
-                        (x - half_w, y - half_h + 18, x + half_w, y + half_h),
+                        mem_dc, text, -1,
+                        (x - half_w, row_top, x + half_w, row_top + ESP_ROW_HEIGHT),
                         win32con.DT_CENTER,
                     )
 

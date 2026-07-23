@@ -22,7 +22,7 @@ local Theme = {
 }
 
 local OVERLAY_ENDPOINT = "http://127.0.0.1:8787/update"
-local OVERLAY_WRITE_INTERVAL = 1 / 20 -- 20 envois/sec suffisent (texte ESP), pas besoin de coller aux 60 FPS du jeu
+local OVERLAY_WRITE_INTERVAL = 1 / 60 -- 60 envois/sec suffisent (texte ESP), pas besoin de coller aux 60 FPS du jeu
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -33,6 +33,8 @@ local EspMode = "Lua" -- "Lua" (BillboardGui) ou "Python" (overlay externe via H
 local EspMaxDistance = 0 -- studs, 0 = illimite
 local ShowHealth = true
 local ShowDistance = false
+local ShowChakra = false
+local ShowBlood = false
 local lastConnOk = nil -- nil = pas encore teste, true/false = dernier resultat request()
 local unloaded = false
 local ChakraSenseNotifier = true
@@ -68,33 +70,81 @@ local function clearChatOverlay(player)
 	end
 end
 
--- Recalcule le texte du hpLabel (PV et/ou distance, selon les toggles) pour un
--- joueur donne. hpLabel se cache tout seul si les deux sont desactives.
+local ROW_HEIGHT = 16
+local CHAKRA_COLOR = Color3.fromRGB(66, 177, 255)
+
+-- Empile les lignes actives (PV / Distance / Chakra / Blood) juste sous le nom,
+-- dans cet ordre fixe, sans laisser de trou pour celles masquees ou sans donnee
+-- (ex: Chakra/Blood introuvables sur un autre joueur si Backpack ne replique pas).
 local function refreshPlayerLabel(data)
 	local humanoid = data.humanoid
 	if not humanoid then return end
 
-	local parts = {}
+	local y = 18 -- sous le nameLabel
 
 	if ShowHealth then
 		local hp = math.max(0, math.floor(humanoid.Health))
 		local maxHp = math.max(1, math.floor(humanoid.MaxHealth))
-		table.insert(parts, string.format("%d/%d PV", hp, maxHp))
+		data.hpLabel.Text = string.format("%d/%d PV", hp, maxHp)
 		data.hpLabel.TextColor3 = healthColor(hp / maxHp)
+		data.hpLabel.Position = UDim2.new(0, 0, 0, y)
+		data.hpLabel.Visible = true
+		y += ROW_HEIGHT
 	else
-		data.hpLabel.TextColor3 = Theme.SubText
+		data.hpLabel.Visible = false
 	end
 
 	if ShowDistance then
 		local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 		local theirRoot = data.billboard.Adornee
 		if myRoot and theirRoot then
-			table.insert(parts, string.format("%dm", math.floor((myRoot.Position - theirRoot.Position).Magnitude)))
+			data.distanceLabel.Text = string.format("%dm", math.floor((myRoot.Position - theirRoot.Position).Magnitude))
+			data.distanceLabel.TextColor3 = Theme.SubText
+			data.distanceLabel.Position = UDim2.new(0, 0, 0, y)
+			data.distanceLabel.Visible = true
+			y += ROW_HEIGHT
+		else
+			data.distanceLabel.Visible = false
 		end
+	else
+		data.distanceLabel.Visible = false
 	end
 
-	data.hpLabel.Text = table.concat(parts, " | ")
-	data.hpLabel.Visible = #parts > 0
+	if ShowChakra then
+		-- Backpack ne replique normalement qu'au client proprietaire : sur les
+		-- autres joueurs ces valeurs seront souvent introuvables (Backpack vide
+		-- ou absent), la ligne Chakra sera alors simplement masquee.
+		local backpack = data.player and data.player:FindFirstChild("Backpack")
+		local chakraVal = backpack and backpack:FindFirstChild("chakra")
+		local maxChakraVal = backpack and backpack:FindFirstChild("maxChakra")
+		if chakraVal and maxChakraVal then
+			data.chakraLabel.Text = string.format("%d/%d Chakra", math.floor(chakraVal.Value), math.floor(maxChakraVal.Value))
+			data.chakraLabel.TextColor3 = CHAKRA_COLOR
+			data.chakraLabel.Position = UDim2.new(0, 0, 0, y)
+			data.chakraLabel.Visible = true
+			y += ROW_HEIGHT
+		else
+			data.chakraLabel.Visible = false
+		end
+	else
+		data.chakraLabel.Visible = false
+	end
+
+	if ShowBlood then
+		local backpack = data.player and data.player:FindFirstChild("Backpack")
+		local bloodVal = backpack and backpack:FindFirstChild("blood")
+		if bloodVal then
+			data.bloodLabel.Text = string.format("%d%%", math.floor(bloodVal.Value))
+			data.bloodLabel.TextColor3 = Theme.SubText
+			data.bloodLabel.Position = UDim2.new(0, 0, 0, y)
+			data.bloodLabel.Visible = true
+			y += ROW_HEIGHT
+		else
+			data.bloodLabel.Visible = false
+		end
+	else
+		data.bloodLabel.Visible = false
+	end
 end
 
 local function refreshAllPlayerLabels()
@@ -116,7 +166,7 @@ local function applyChatOverlay(player)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "LightChatOverlay_Health"
 	billboard.Adornee = rootPart
-	billboard.Size = UDim2.new(0, 140, 0, 36)
+	billboard.Size = UDim2.new(0, 140, 0, 90)
 	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
 	billboard.AlwaysOnTop = true
 	billboard.Enabled = enabled and (EspMode == "Lua")
@@ -132,20 +182,35 @@ local function applyChatOverlay(player)
 	nameLabel.Text = player.Name
 	nameLabel.Parent = billboard
 
-	local hpLabel = Instance.new("TextLabel")
-	hpLabel.BackgroundTransparency = 1
-	hpLabel.Position = UDim2.new(0, 0, 0, 18)
-	hpLabel.Size = UDim2.new(1, 0, 0, 18)
-	hpLabel.Font = Enum.Font.GothamBold
-	hpLabel.TextSize = 13
-	hpLabel.TextStrokeTransparency = 0.4
-	hpLabel.Parent = billboard
+	-- Une ligne dediee par info (PV / Distance / Chakra / Blood) : chacune peut
+	-- avoir sa propre couleur et s'empile dynamiquement dans refreshPlayerLabel
+	-- selon les toggles actifs, sans laisser de trou entre les lignes masquees.
+	local function makeRowLabel()
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.new(1, 0, 0, 16)
+		label.Font = Enum.Font.GothamBold
+		label.TextSize = 13
+		label.TextStrokeTransparency = 0.4
+		label.Visible = false
+		label.Parent = billboard
+		return label
+	end
+
+	local hpLabel = makeRowLabel()
+	local distanceLabel = makeRowLabel()
+	local chakraLabel = makeRowLabel()
+	local bloodLabel = makeRowLabel()
 
 	local data = {
 		billboard = billboard,
 		humanoid = humanoid,
 		hpLabel = hpLabel,
+		distanceLabel = distanceLabel,
+		chakraLabel = chakraLabel,
+		bloodLabel = bloodLabel,
 		nameLabel = nameLabel,
+		player = player,
 	}
 	ChatOverlayByPlayer[player] = data
 
@@ -200,7 +265,7 @@ track(RunService.Heartbeat:Connect(function()
 				visible = (myRoot.Position - theirRoot.Position).Magnitude <= EspMaxDistance
 			end
 			data.billboard.Enabled = visible
-			if visible and ShowDistance then
+			if visible and (ShowDistance or ShowChakra or ShowBlood) then
 				refreshPlayerLabel(data)
 			end
 		end
@@ -250,6 +315,26 @@ local function writeOverlayData()
 					-- clipping) : plus besoin de reimplementer la matrice cote overlay.
 					local screenPoint, onScreen = camera:WorldToScreenPoint(rootPart.Position)
 					if onScreen then
+						local backpack = (ShowChakra or ShowBlood) and player:FindFirstChild("Backpack") or nil
+
+						local chakra, maxChakra = nil, nil
+						if ShowChakra and backpack then
+							local chakraVal = backpack:FindFirstChild("chakra")
+							local maxChakraVal = backpack:FindFirstChild("maxChakra")
+							if chakraVal and maxChakraVal then
+								chakra = math.floor(chakraVal.Value)
+								maxChakra = math.floor(maxChakraVal.Value)
+							end
+						end
+
+						local blood = nil
+						if ShowBlood and backpack then
+							local bloodVal = backpack:FindFirstChild("blood")
+							if bloodVal then
+								blood = math.floor(bloodVal.Value)
+							end
+						end
+
 						table.insert(players, {
 							name = player.Name,
 							hp = math.max(0, math.floor(humanoid.Health)),
@@ -257,6 +342,9 @@ local function writeOverlayData()
 							x = screenPoint.X,
 							y = screenPoint.Y,
 							dist = dist and math.floor(dist) or nil,
+							chakra = chakra,
+							maxChakra = maxChakra,
+							blood = blood,
 						})
 					end
 				end
@@ -269,6 +357,7 @@ local function writeOverlayData()
 		enabled = enabled and (EspMode == "Python"),
 		showHealth = ShowHealth,
 		showDistance = ShowDistance,
+		showChakra = ShowChakra,
 		viewport = { x = viewport.X, y = viewport.Y },
 		players = players,
 	}
@@ -928,6 +1017,16 @@ end)
 
 addToggleRow(EspSection, "Afficher Distance", ShowDistance, function(state)
 	ShowDistance = state
+	refreshAllPlayerLabels()
+end)
+
+addToggleRow(EspSection, "Afficher Chakra", ShowChakra, function(state)
+	ShowChakra = state
+	refreshAllPlayerLabels()
+end)
+
+addToggleRow(EspSection, "Afficher Blood", ShowBlood, function(state)
+	ShowBlood = state
 	refreshAllPlayerLabels()
 end)
 
