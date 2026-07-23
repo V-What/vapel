@@ -1,0 +1,1068 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local MENU_TOGGLE_KEY = Enum.KeyCode.RightControl -- ouvre/ferme le menu (comme Window.ToggleKey dans RbxUI)
+
+local Theme = {
+	Background = Color3.fromRGB(22, 22, 26),
+	Panel = Color3.fromRGB(30, 30, 36),
+	Element = Color3.fromRGB(40, 40, 47),
+	Stroke = Color3.fromRGB(54, 54, 62),
+	Accent = Color3.fromRGB(114, 137, 255),
+	Text = Color3.fromRGB(235, 235, 240),
+	SubText = Color3.fromRGB(150, 150, 158),
+}
+
+local OVERLAY_ENDPOINT = "http://127.0.0.1:8787/update"
+local OVERLAY_WRITE_INTERVAL = 1 / 20 -- 20 envois/sec suffisent (texte ESP), pas besoin de coller aux 60 FPS du jeu
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+local ChatOverlayByPlayer = {}
+local enabled = false
+local EspMode = "Lua" -- "Lua" (BillboardGui) ou "Python" (overlay externe via HTTP)
+local EspMaxDistance = 0 -- studs, 0 = illimite
+local ShowHealth = true
+local ShowDistance = false
+local lastConnOk = nil -- nil = pas encore teste, true/false = dernier resultat request()
+local unloaded = false
+local ChakraSenseNotifier = true
+local NoFogEnabled = false
+local NoRainEnabled = false
+local FullBrightEnabled = false
+local BrightnessLevel = 1
+local TimeChangerEnabled = false
+local TimeOfDay = "Morning"
+
+-- Connexions "longue duree" (Heartbeat, PlayerAdded/Removing, InputBegan...) a
+-- couper explicitement au unload -- contrairement aux connexions par-joueur
+-- (Health/MaxHealth), deja gerees par clearChatOverlay.
+local Connections = {}
+local function track(connection)
+	table.insert(Connections, connection)
+	return connection
+end
+
+local function healthColor(pct)
+	if pct > 0.6 then return Color3.fromRGB(90, 220, 120) end
+	if pct > 0.3 then return Color3.fromRGB(230, 200, 80) end
+	return Color3.fromRGB(230, 80, 80)
+end
+
+local function clearChatOverlay(player)
+	local data = ChatOverlayByPlayer[player]
+	if data then
+		if data.billboard then data.billboard:Destroy() end
+		if data.healthConn then data.healthConn:Disconnect() end
+		if data.maxHealthConn then data.maxHealthConn:Disconnect() end
+		ChatOverlayByPlayer[player] = nil
+	end
+end
+
+-- Recalcule le texte du hpLabel (PV et/ou distance, selon les toggles) pour un
+-- joueur donne. hpLabel se cache tout seul si les deux sont desactives.
+local function refreshPlayerLabel(data)
+	local humanoid = data.humanoid
+	if not humanoid then return end
+
+	local parts = {}
+
+	if ShowHealth then
+		local hp = math.max(0, math.floor(humanoid.Health))
+		local maxHp = math.max(1, math.floor(humanoid.MaxHealth))
+		table.insert(parts, string.format("%d/%d PV", hp, maxHp))
+		data.hpLabel.TextColor3 = healthColor(hp / maxHp)
+	else
+		data.hpLabel.TextColor3 = Theme.SubText
+	end
+
+	if ShowDistance then
+		local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local theirRoot = data.billboard.Adornee
+		if myRoot and theirRoot then
+			table.insert(parts, string.format("%dm", math.floor((myRoot.Position - theirRoot.Position).Magnitude)))
+		end
+	end
+
+	data.hpLabel.Text = table.concat(parts, " | ")
+	data.hpLabel.Visible = #parts > 0
+end
+
+local function refreshAllPlayerLabels()
+	for _, data in pairs(ChatOverlayByPlayer) do
+		refreshPlayerLabel(data)
+	end
+end
+
+local function applyChatOverlay(player)
+	if player == LocalPlayer then return end
+
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+	if not rootPart or not humanoid then return end
+
+	clearChatOverlay(player)
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "LightChatOverlay_Health"
+	billboard.Adornee = rootPart
+	billboard.Size = UDim2.new(0, 140, 0, 36)
+	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = enabled and (EspMode == "Lua")
+	billboard.Parent = rootPart
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Size = UDim2.new(1, 0, 0, 18)
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 13
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextStrokeTransparency = 0.4
+	nameLabel.Text = player.Name
+	nameLabel.Parent = billboard
+
+	local hpLabel = Instance.new("TextLabel")
+	hpLabel.BackgroundTransparency = 1
+	hpLabel.Position = UDim2.new(0, 0, 0, 18)
+	hpLabel.Size = UDim2.new(1, 0, 0, 18)
+	hpLabel.Font = Enum.Font.GothamBold
+	hpLabel.TextSize = 13
+	hpLabel.TextStrokeTransparency = 0.4
+	hpLabel.Parent = billboard
+
+	local data = {
+		billboard = billboard,
+		humanoid = humanoid,
+		hpLabel = hpLabel,
+		nameLabel = nameLabel,
+	}
+	ChatOverlayByPlayer[player] = data
+
+	local function updateHealth()
+		refreshPlayerLabel(data)
+	end
+	updateHealth()
+
+	data.healthConn = humanoid:GetPropertyChangedSignal("Health"):Connect(updateHealth)
+	data.maxHealthConn = humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(updateHealth)
+end
+
+local function onPlayerAdded(player)
+	if player == LocalPlayer then return end
+
+	player.CharacterAdded:Connect(function(character)
+		if unloaded then return end
+		character:WaitForChild("HumanoidRootPart", 10)
+		task.wait() -- laisse le Humanoid se parenter
+		if unloaded then return end
+		applyChatOverlay(player)
+	end)
+
+	if player.Character then applyChatOverlay(player) end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(onPlayerAdded, player)
+end
+track(Players.PlayerAdded:Connect(onPlayerAdded))
+track(Players.PlayerRemoving:Connect(clearChatOverlay))
+
+local function setEnabled(state)
+	enabled = state
+	for _, data in pairs(ChatOverlayByPlayer) do
+		data.billboard.Enabled = enabled and (EspMode == "Lua")
+	end
+end
+
+-- Visibilite par distance + rafraichissement du texte (PV/distance) pour l'ESP
+-- Lua, une fois par frame. Ne tourne que si l'ESP est actif en mode Lua.
+track(RunService.Heartbeat:Connect(function()
+	if not (enabled and EspMode == "Lua") then return end
+
+	local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+	for _, data in pairs(ChatOverlayByPlayer) do
+		local theirRoot = data.billboard.Adornee
+		if theirRoot then
+			local visible = true
+			if EspMaxDistance > 0 and myRoot then
+				visible = (myRoot.Position - theirRoot.Position).Magnitude <= EspMaxDistance
+			end
+			data.billboard.Enabled = visible
+			if visible and ShowDistance then
+				refreshPlayerLabel(data)
+			end
+		end
+	end
+end))
+
+local function sendOverlayPacket(data)
+	local ok, response = pcall(request, {
+		Url = OVERLAY_ENDPOINT,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json" },
+		Body = HttpService:JSONEncode(data),
+	})
+	lastConnOk = ok and response ~= nil
+end
+
+-- Previent l'overlay Python quand on desactive l'ESP ou qu'on quitte le mode
+-- Python : sans ca, writeOverlayData s'arrete d'envoyer et l'overlay garderait
+-- affiches les derniers joueurs recus indefiniment.
+local function pushOverlayDisabled()
+	if not request then return end
+	task.spawn(function()
+		pcall(sendOverlayPacket, { enabled = false, players = {} })
+	end)
+end
+
+local function writeOverlayData()
+	if not (enabled and EspMode == "Python") then return end
+
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+
+	local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+	local players = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local character = player.Character
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+			if humanoid and rootPart then
+				local dist = myRoot and (myRoot.Position - rootPart.Position).Magnitude or nil
+				local withinRange = EspMaxDistance <= 0 or not dist or dist <= EspMaxDistance
+
+				if withinRange then
+					-- WorldToScreenPoint fait la projection cote Roblox (FOV, aspect ratio,
+					-- clipping) : plus besoin de reimplementer la matrice cote overlay.
+					local screenPoint, onScreen = camera:WorldToScreenPoint(rootPart.Position)
+					if onScreen then
+						table.insert(players, {
+							name = player.Name,
+							hp = math.max(0, math.floor(humanoid.Health)),
+							maxHp = math.max(1, math.floor(humanoid.MaxHealth)),
+							x = screenPoint.X,
+							y = screenPoint.Y,
+							dist = dist and math.floor(dist) or nil,
+						})
+					end
+				end
+			end
+		end
+	end
+
+	local viewport = camera.ViewportSize
+	local data = {
+		enabled = enabled and (EspMode == "Python"),
+		showHealth = ShowHealth,
+		showDistance = ShowDistance,
+		viewport = { x = viewport.X, y = viewport.Y },
+		players = players,
+	}
+
+	sendOverlayPacket(data)
+end
+
+if request then
+	local writeAccum = 0
+	local requestInFlight = false -- evite d'empiler les requetes si le serveur Python repond lentement
+	track(RunService.Heartbeat:Connect(function(dt)
+		writeAccum += dt
+		if writeAccum < OVERLAY_WRITE_INTERVAL then return end
+		writeAccum = 0
+		if requestInFlight then return end
+		requestInFlight = true
+		task.spawn(function()
+			pcall(writeOverlayData)
+			requestInFlight = false
+		end)
+	end))
+end
+
+--------------------------------------------------------------------------------
+-- Effets visuels (Lighting / ReplicatedStorage.Raining) : uniquement du rendu
+-- cote client, aucun impact sur les autres joueurs.
+--------------------------------------------------------------------------------
+
+local originalFogEnd = Lighting.FogEnd
+local originalBrightness = Lighting.Brightness
+
+local CLOCK_TIMES = {
+	Morning = 6.3,
+	Afternoon = 14,
+	Evening = 18,
+	Night = 0,
+}
+
+local noFogConn = nil
+local function setNoFog(state)
+	NoFogEnabled = state
+	if noFogConn then
+		noFogConn:Disconnect()
+		noFogConn = nil
+	end
+	if state then
+		noFogConn = track(RunService.RenderStepped:Connect(function()
+			Lighting.FogEnd = 9999999999
+		end))
+	else
+		Lighting.FogEnd = originalFogEnd
+	end
+end
+
+local fullBrightConn = nil
+local function setFullBright(state)
+	FullBrightEnabled = state
+	if fullBrightConn then
+		fullBrightConn:Disconnect()
+		fullBrightConn = nil
+	end
+	if state then
+		fullBrightConn = track(RunService.RenderStepped:Connect(function()
+			Lighting.Brightness = BrightnessLevel
+		end))
+	else
+		Lighting.Brightness = originalBrightness
+	end
+end
+
+local timeChangerConn = nil
+local function setTimeChanger(state)
+	TimeChangerEnabled = state
+	if timeChangerConn then
+		timeChangerConn:Disconnect()
+		timeChangerConn = nil
+	end
+	if state then
+		timeChangerConn = track(RunService.RenderStepped:Connect(function()
+			Lighting.ClockTime = CLOCK_TIMES[TimeOfDay] or CLOCK_TIMES.Morning
+		end))
+	end
+end
+
+-- Contrairement a l'original (funcs.noRain dans final_version_vapel.lua), qui
+-- ne coupe jamais vraiment la boucle au toggle off (le flag "state" n'etait
+-- teste qu'a l'activation) : ici noRainActive stoppe proprement la boucle.
+local noRainActive = false
+local function setNoRain(state)
+	NoRainEnabled = state
+	noRainActive = state
+	if not state then return end
+
+	local rainingValue = ReplicatedStorage:FindFirstChild("Raining")
+	if not rainingValue then return end
+
+	task.spawn(function()
+		while noRainActive and not unloaded do
+			rainingValue.Value = ""
+			task.wait()
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Menu "VapeL" : cache par defaut, s'ouvre/se ferme avec MENU_TOGGLE_KEY (meme
+-- principe que RbxUI:CreateWindow / Window.ToggleKey dans final_version_vapel.lua).
+-- Categories Visuels / Joueur / Autres, scopees a ce que ce script fait
+-- reellement (reglages ESP + etat de connexion au serveur Python).
+--------------------------------------------------------------------------------
+
+local function create(class, props, parent)
+	local inst = Instance.new(class)
+	for key, value in pairs(props or {}) do
+		inst[key] = value
+	end
+	if parent then inst.Parent = parent end
+	return inst
+end
+
+local function corner(parent, radius)
+	return create("UICorner", { CornerRadius = UDim.new(0, radius or 6) }, parent)
+end
+
+local function tween(inst, props, time)
+	TweenService:Create(inst, TweenInfo.new(time or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "VapeL"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+--------------------------------------------------------------------------------
+-- Toasts (notifications) - utilises par ChakraSenseNotifier
+--------------------------------------------------------------------------------
+
+local ToastHolder = create("Frame", {
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -13, 1, -13),
+	Size = UDim2.new(0, 280, 0, 400),
+	BackgroundTransparency = 1,
+}, ScreenGui)
+create("UIListLayout", {
+	Padding = UDim.new(0, 6),
+	HorizontalAlignment = Enum.HorizontalAlignment.Right,
+	VerticalAlignment = Enum.VerticalAlignment.Bottom,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, ToastHolder)
+
+local function notify(text)
+	if unloaded then return end
+
+	local toast = create("Frame", {
+		Size = UDim2.new(0, 260, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Theme.Panel,
+		BackgroundTransparency = 1,
+	}, ToastHolder)
+	corner(toast, 8)
+	create("UIStroke", { Color = Theme.Stroke }, toast)
+	create("UIPadding", {
+		PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+		PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
+	}, toast)
+
+	local label = create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		TextColor3 = Theme.Text,
+		TextWrapped = true,
+		TextTransparency = 1,
+	}, toast)
+
+	tween(toast, { BackgroundTransparency = 0 }, 0.15)
+	tween(label, { TextTransparency = 0 }, 0.15)
+
+	task.delay(3, function()
+		if not toast.Parent then return end
+		tween(toast, { BackgroundTransparency = 1 }, 0.15)
+		tween(label, { TextTransparency = 1 }, 0.15)
+		task.wait(0.15)
+		toast:Destroy()
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Safe Spot : marque-page de position (enregistre ou tu es, revient plus tard
+-- au meme endroit). Ne touche ni aux collisions ni aux degats.
+--------------------------------------------------------------------------------
+
+local SafeSpotPosition = nil
+
+local function setSafeSpot()
+	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	SafeSpotPosition = rootPart.Position
+	notify("Safe Spot enregistre.")
+end
+
+local function teleportToSafeSpot()
+	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	if not SafeSpotPosition then
+		notify("Aucun Safe Spot enregistre.")
+		return
+	end
+	rootPart.CFrame = CFrame.new(SafeSpotPosition)
+end
+
+--------------------------------------------------------------------------------
+-- Chakra Points : points de teleportation predefinis par le jeu lui-meme
+-- (workspace.ChakraPoints), pas des coordonnees arbitraires.
+--------------------------------------------------------------------------------
+
+local ChakraPointPositions = {}
+local ChakraPointNames = {}
+
+do
+	local chakraPointsFolder = workspace:FindFirstChild("ChakraPoints")
+	if chakraPointsFolder then
+		for _, point in ipairs(chakraPointsFolder:GetChildren()) do
+			local nameValue = point:FindFirstChild("PointName")
+			local mainPart = point:FindFirstChild("Main")
+			if nameValue and mainPart then
+				table.insert(ChakraPointNames, nameValue.Value)
+				ChakraPointPositions[nameValue.Value] = mainPart.Position
+			end
+		end
+	end
+end
+
+local SelectedChakraPoint = ChakraPointNames[1]
+
+local function teleportToChakraPoint()
+	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+
+	local pos = ChakraPointPositions[SelectedChakraPoint]
+	if not pos then
+		notify("Aucun Chakra Point selectionne.")
+		return
+	end
+
+	rootPart.CFrame = CFrame.new(pos - Vector3.new(0, 0, 5), pos)
+end
+
+local Main = create("Frame", {
+	Size = UDim2.new(0, 460, 0, 320),
+	Position = UDim2.new(0.5, -230, 0.5, -160),
+	BackgroundColor3 = Theme.Background,
+	Visible = false,
+	Active = true,
+}, ScreenGui)
+corner(Main, 10)
+create("UIStroke", { Color = Theme.Stroke }, Main)
+
+local TopBar = create("Frame", { Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = Theme.Panel }, Main)
+corner(TopBar, 10)
+
+create("TextLabel", {
+	BackgroundTransparency = 1,
+	Position = UDim2.new(0, 16, 0, 0),
+	Size = UDim2.new(1, -70, 1, 0),
+	Text = "VapeL",
+	Font = Enum.Font.GothamBold,
+	TextSize = 20,
+	TextColor3 = Theme.Text,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, TopBar)
+
+local CloseButton = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -14, 0.5, 0),
+	Size = UDim2.new(0, 30, 0, 30),
+	BackgroundColor3 = Theme.Element,
+	Text = "X",
+	Font = Enum.Font.GothamBold,
+	TextSize = 15,
+	TextColor3 = Theme.Text,
+	AutoButtonColor = false,
+}, TopBar)
+corner(CloseButton, 6)
+CloseButton.MouseButton1Click:Connect(function() Main.Visible = false end)
+
+-- Drag de la fenetre (via la barre de titre)
+do
+	local dragging, dragStart, startPos
+	TopBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = Main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+local Sidebar = create("Frame", {
+	Position = UDim2.new(0, 0, 0, 42),
+	Size = UDim2.new(0, 130, 1, -42),
+	BackgroundColor3 = Theme.Panel,
+}, Main)
+create("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, Sidebar)
+create("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, Sidebar)
+
+local PagesHolder = create("Frame", {
+	Position = UDim2.new(0, 130, 0, 42),
+	Size = UDim2.new(1, -130, 1, -42),
+	BackgroundTransparency = 1,
+}, Main)
+
+local pages, sidebarButtons, currentPage = {}, {}, nil
+
+local function selectPage(name)
+	if currentPage then
+		pages[currentPage].Visible = false
+		sidebarButtons[currentPage].BackgroundColor3 = Theme.Element
+		sidebarButtons[currentPage].TextColor3 = Theme.SubText
+	end
+	pages[name].Visible = true
+	sidebarButtons[name].BackgroundColor3 = Theme.Accent
+	sidebarButtons[name].TextColor3 = Color3.new(1, 1, 1)
+	currentPage = name
+end
+
+local function createCategory(name)
+	local Button = create("TextButton", {
+		Size = UDim2.new(1, 0, 0, 38),
+		BackgroundColor3 = Theme.Element,
+		Text = name,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.SubText,
+		AutoButtonColor = false,
+	}, Sidebar)
+	corner(Button, 6)
+	Button.MouseButton1Click:Connect(function() selectPage(name) end)
+
+	local Page = create("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Theme.Accent,
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		Visible = false,
+	}, PagesHolder)
+	create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, Page)
+	create("UIPadding", {
+		PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10),
+		PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+	}, Page)
+
+	pages[name] = Page
+	sidebarButtons[name] = Button
+	return Page
+end
+
+local function addSection(page, title)
+	local Card = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Theme.Panel,
+	}, page)
+	corner(Card, 8)
+	create("UIStroke", { Color = Theme.Stroke }, Card)
+
+	create("TextLabel", {
+		Position = UDim2.new(0, 10, 0, 8),
+		Size = UDim2.new(1, -20, 0, 20),
+		BackgroundTransparency = 1,
+		Text = title,
+		Font = Enum.Font.GothamBold,
+		TextSize = 15,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, Card)
+
+	local Content = create("Frame", {
+		Position = UDim2.new(0, 10, 0, 34),
+		Size = UDim2.new(1, -20, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, Card)
+	create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, Content)
+	create("UIPadding", { PaddingBottom = UDim.new(0, 10) }, Content)
+
+	return Content
+end
+
+local function addToggleRow(content, text, default, onChange)
+	local state = default or false
+
+	local Row = create("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1 }, content)
+	create("TextLabel", {
+		Size = UDim2.new(1, -60, 1, 0),
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, Row)
+
+	local Switch = create("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.new(0, 46, 0, 24),
+		BackgroundColor3 = state and Theme.Accent or Theme.Element,
+	}, Row)
+	corner(Switch, 12)
+
+	local Knob = create("Frame", {
+		Size = UDim2.new(0, 18, 0, 18),
+		Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+	}, Switch)
+	corner(Knob, 9)
+
+	local Click = create("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "" }, Switch)
+
+	local function set(newState)
+		state = newState
+		tween(Switch, { BackgroundColor3 = state and Theme.Accent or Theme.Element })
+		tween(Knob, { Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9) })
+		if onChange then onChange(state) end
+	end
+	Click.MouseButton1Click:Connect(function() set(not state) end)
+
+	return { Set = set, Get = function() return state end }
+end
+
+local function addDropdownRow(content, text, options, default, onChange)
+	local selected = default or options[1]
+
+	local Holder = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = Theme.Element,
+		ClipsDescendants = true,
+	}, content)
+	corner(Holder, 6)
+
+	local MainButton = create("TextButton", {
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+		Text = text .. ": " .. tostring(selected),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.Text,
+		AutoButtonColor = false,
+	}, Holder)
+
+	local List = create("Frame", {
+		Position = UDim2.new(0, 0, 0, 34),
+		Size = UDim2.new(1, 0, 0, #options * 30),
+		BackgroundTransparency = 1,
+	}, Holder)
+	create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, List)
+
+	local open = false
+	local function close()
+		open = false
+		tween(Holder, { Size = UDim2.new(1, 0, 0, 34) })
+	end
+
+	for _, option in ipairs(options) do
+		local OptButton = create("TextButton", {
+			Size = UDim2.new(1, 0, 0, 30),
+			BackgroundTransparency = 1,
+			Text = tostring(option),
+			Font = Enum.Font.Gotham,
+			TextSize = 13,
+			TextColor3 = Theme.SubText,
+		}, List)
+		OptButton.MouseButton1Click:Connect(function()
+			selected = option
+			MainButton.Text = text .. ": " .. tostring(selected)
+			close()
+			if onChange then onChange(selected) end
+		end)
+	end
+
+	MainButton.MouseButton1Click:Connect(function()
+		open = not open
+		if open then
+			tween(Holder, { Size = UDim2.new(1, 0, 0, 34 + #options * 30) })
+		else
+			close()
+		end
+	end)
+
+	return { Get = function() return selected end }
+end
+
+local function addSliderRow(content, text, min, max, default, step, onChange)
+	step = step or 1
+	local value = default or min
+
+	local Holder = create("Frame", { Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1 }, content)
+	create("TextLabel", {
+		Size = UDim2.new(1, -60, 0, 20),
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, Holder)
+
+	local decimals = step < 1 and math.max(0, -math.floor(math.log10(step) + 0.0001)) or 0
+	local function formatValue(v)
+		if v <= 0 and min <= 0 then return "Illimite" end
+		return string.format("%." .. decimals .. "f", v)
+	end
+
+	local ValueLabel = create("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.new(0, 70, 0, 20),
+		BackgroundTransparency = 1,
+		Text = formatValue(value),
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, Holder)
+
+	local Bar = create("Frame", {
+		Position = UDim2.new(0, 0, 0, 28),
+		Size = UDim2.new(1, 0, 0, 10),
+		BackgroundColor3 = Theme.Element,
+	}, Holder)
+	corner(Bar, 5)
+
+	local function pctFor(v) return (v - min) / (max - min) end
+
+	local Fill = create("Frame", { Size = UDim2.new(pctFor(value), 0, 1, 0), BackgroundColor3 = Theme.Accent }, Bar)
+	corner(Fill, 5)
+
+	local dragging = false
+	local function apply(x)
+		local p = math.clamp((x - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+		local raw = min + (max - min) * p
+		value = math.clamp(math.floor(raw / step + 0.5) * step, min, max)
+		Fill.Size = UDim2.new(pctFor(value), 0, 1, 0)
+		ValueLabel.Text = formatValue(value)
+		if onChange then onChange(value) end
+	end
+
+	Bar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			apply(input.Position.X)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			apply(input.Position.X)
+		end
+	end)
+
+	return { Get = function() return value end }
+end
+
+local function addLabelRow(content, text)
+	return create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 18),
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+	}, content)
+end
+
+local function addButtonRow(content, text, onClick)
+	local Button = create("TextButton", {
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundColor3 = Theme.Element,
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.Text,
+		AutoButtonColor = false,
+	}, content)
+	corner(Button, 6)
+
+	Button.MouseButton1Click:Connect(function()
+		tween(Button, { BackgroundColor3 = Theme.Accent }, 0.1)
+		task.delay(0.1, function()
+			tween(Button, { BackgroundColor3 = Theme.Element }, 0.15)
+		end)
+		if onClick then onClick() end
+	end)
+
+	return Button
+end
+
+--------------------------------------------------------------------------------
+-- Categories
+--------------------------------------------------------------------------------
+
+local VisualsPage = createCategory("Visuels")
+local PlayerPage = createCategory("Joueur")
+local OtherPage = createCategory("Autres")
+
+--------------------------------------------------------------------------------
+------------------------------- VISUALS ----------------------------------------
+--------------------------------------------------------------------------------
+
+
+-- Reglages ESP : active/désactive, mode (Lua ou Python), distance max, affichage PV et distance.
+
+local EspSection = addSection(VisualsPage, "ESP")
+
+addToggleRow(EspSection, "ESP Actif", enabled, function(state)
+	setEnabled(state)
+	if not state then pushOverlayDisabled() end
+end)
+
+addDropdownRow(EspSection, "Mode ESP", { "Lua", "Python" }, EspMode, function(mode)
+	local wasPython = enabled and EspMode == "Python"
+	EspMode = mode
+	setEnabled(enabled) -- reapplique la visibilite des billboards selon le nouveau mode
+	if wasPython and mode ~= "Python" then pushOverlayDisabled() end
+end)
+
+addSliderRow(EspSection, "Distance Max", 0, 10000, EspMaxDistance, 1, function(v)
+	EspMaxDistance = v
+end)
+
+addToggleRow(EspSection, "Afficher PV", ShowHealth, function(state)
+	ShowHealth = state
+	refreshAllPlayerLabels()
+end)
+
+addToggleRow(EspSection, "Afficher Distance", ShowDistance, function(state)
+	ShowDistance = state
+	refreshAllPlayerLabels()
+end)
+
+local EnvSection = addSection(VisualsPage, "Environnement")
+
+addToggleRow(EnvSection, "No Fog", NoFogEnabled, setNoFog)
+addToggleRow(EnvSection, "No Rain", NoRainEnabled, setNoRain)
+addToggleRow(EnvSection, "Full Bright", FullBrightEnabled, setFullBright)
+
+addSliderRow(EnvSection, "Brightness Level", 1, 10, BrightnessLevel, 0.1, function(v)
+	BrightnessLevel = v
+end)
+
+addDropdownRow(EnvSection, "Heure", { "Morning", "Afternoon", "Evening", "Night" }, TimeOfDay, function(v)
+	TimeOfDay = v
+end)
+
+addToggleRow(EnvSection, "Time Changer", TimeChangerEnabled, setTimeChanger)
+
+--------------------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------------------
+------------------------------- PLAYER -----------------------------------------
+--------------------------------------------------------------------------------
+
+local NotifSection = addSection(PlayerPage, "Notifications")
+
+addToggleRow(NotifSection, "Chakra Sense Notifier", ChakraSenseNotifier, function(state)
+	ChakraSenseNotifier = state
+end)
+
+local SafeSpotSection = addSection(PlayerPage, "Safe Spot")
+addButtonRow(SafeSpotSection, "Definir Safe Spot", setSafeSpot)
+addButtonRow(SafeSpotSection, "Teleporter au Safe Spot", teleportToSafeSpot)
+
+local ChakraPointsSection = addSection(PlayerPage, "Chakra Points")
+if #ChakraPointNames > 0 then
+	addDropdownRow(ChakraPointsSection, "Chakra Point", ChakraPointNames, SelectedChakraPoint, function(v)
+		SelectedChakraPoint = v
+	end)
+	addButtonRow(ChakraPointsSection, "Teleporter", teleportToChakraPoint)
+else
+	addLabelRow(ChakraPointsSection, "Aucun ChakraPoints trouve dans workspace.")
+end
+
+local ConnSection = addSection(OtherPage, "Connexion serveur Python")
+addLabelRow(ConnSection, "Endpoint : " .. OVERLAY_ENDPOINT)
+local StatusLabel = addLabelRow(ConnSection, "Statut : en attente...")
+
+--------------------------------------------------------------------------------
+------------------------------- AUTRES -----------------------------------------
+--------------------------------------------------------------------------------
+
+local ShortcutSection = addSection(OtherPage, "Raccourcis")
+addLabelRow(ShortcutSection, "Touche menu : " .. MENU_TOGGLE_KEY.Name)
+
+-- Coupe tout proprement : previent le renderer Python (enabled=false), coupe
+-- toutes les connexions longue-duree, detruit les billboards et le menu.
+local function unload()
+	if unloaded then return end
+	unloaded = true
+
+	if request then
+		pcall(sendOverlayPacket, { enabled = false, players = {} })
+	end
+
+	for _, connection in ipairs(Connections) do
+		connection:Disconnect()
+	end
+
+	for player in pairs(ChatOverlayByPlayer) do
+		clearChatOverlay(player)
+	end
+
+	ScreenGui:Destroy()
+end
+
+local SessionSection = addSection(OtherPage, "Session")
+local UnloadButton = create("TextButton", {
+	Size = UDim2.new(1, 0, 0, 36),
+	BackgroundColor3 = Color3.fromRGB(200, 60, 60),
+	Text = "Decharger le script",
+	Font = Enum.Font.GothamBold,
+	TextSize = 14,
+	TextColor3 = Color3.new(1, 1, 1),
+	AutoButtonColor = false,
+}, SessionSection)
+corner(UnloadButton, 6)
+UnloadButton.MouseButton1Click:Connect(unload)
+
+-- Alerte si un joueur a le cooldown "Chakra Sense" actif (structure
+-- ReplicatedStorage.Cooldowns.<Joueur>.<NomCooldown> propre a ce jeu).
+-- Verifie toutes les 15s, seulement quand ChakraSenseNotifier est coche.
+task.spawn(function()
+	while not unloaded do
+		task.wait(15)
+		if unloaded or not ChakraSenseNotifier then continue end
+
+		local cooldownsFolder = ReplicatedStorage:FindFirstChild("Cooldowns")
+		if not cooldownsFolder then continue end
+
+		for _, playerFolder in ipairs(cooldownsFolder:GetChildren()) do
+			if playerFolder:FindFirstChild("Chakra Sense") then
+				notify(string.format("%s a Chakra Sense actif", playerFolder.Name))
+			end
+		end
+	end
+end)
+
+selectPage("Visuels")
+
+-- Rafraichit le statut de connexion une fois par seconde (pas besoin de plus).
+task.spawn(function()
+	while not unloaded do
+		if lastConnOk == nil then
+			StatusLabel.Text = "Statut : en attente..."
+			StatusLabel.TextColor3 = Theme.SubText
+		elseif lastConnOk then
+			StatusLabel.Text = "Statut : connecte"
+			StatusLabel.TextColor3 = Color3.fromRGB(90, 220, 120)
+		else
+			StatusLabel.Text = "Statut : deconnecte (lance light_chat_overlay.py ?)"
+			StatusLabel.TextColor3 = Color3.fromRGB(230, 80, 80)
+		end
+		task.wait(1)
+	end
+end)
+
+track(UserInputService.InputBegan:Connect(function(input, gpe)
+	if unloaded then return end
+	if gpe then return end
+	if input.KeyCode == MENU_TOGGLE_KEY then
+		Main.Visible = not Main.Visible
+	end
+end))
