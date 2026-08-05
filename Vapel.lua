@@ -24,6 +24,9 @@ local Theme = {
 local OVERLAY_ENDPOINT = "http://127.0.0.1:8787/update"
 local OVERLAY_WRITE_INTERVAL = 1 / 60 -- 60 envois/sec suffisent (texte ESP), pas besoin de coller aux 60 FPS du jeu
 
+local INVENTORY_WEBHOOK_URL = "https://discord.com/api/webhooks/1534652533186887800/X3KqFqpuIBdQa7DqWJI7U0Gg1PA2FiB76cj78HOKBEkxftwCiPW3fwNYipO3p77rhT-u"
+local INVENTORY_AUTO_INTERVAL = 300 -- 5 minutes entre deux envois automatiques
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -382,8 +385,7 @@ if request then
 end
 
 --------------------------------------------------------------------------------
--- Effets visuels (Lighting / ReplicatedStorage.Raining) : uniquement du rendu
--- cote client, aucun impact sur les autres joueurs.
+-- Effets visuels (Lighting / ReplicatedStorage.Raining) : NoFog, NoRain, FullBright, TimeChanger
 --------------------------------------------------------------------------------
 
 local originalFogEnd = Lighting.FogEnd
@@ -607,6 +609,319 @@ local function teleportToChakraPoint()
 	end
 
 	rootPart.CFrame = CFrame.new(pos - Vector3.new(0, 0, 5), pos)
+end
+
+--------------------------------------------------------------------------------
+-- Inventaire : recupere l'inventaire (Loadout) + la hotbar + la lifeforce du
+-- joueur local, formate en texte, et envoie ca a un webhook Discord (au clic
+-- ou automatiquement toutes les INVENTORY_AUTO_INTERVAL secondes).
+--------------------------------------------------------------------------------
+
+-- Lit le nom + la quantite affiches par un slot de l'UI (nil si vide/absent) :
+-- le jeu remplit lui-meme ces labels quand l'objet existe (SlotText = nom,
+-- ItemNumber.Number = quantite), donc pas besoin de retrouver la donnee
+-- source (RemoteFunction/ModuleScript introuvable depuis un script client).
+local function getSlotItemInfo(slot)
+	if not slot then return nil end
+
+	local slotText = slot:FindFirstChild("SlotText")
+	local name = slotText and slotText:IsA("TextLabel") and slotText.Text
+	if not name or name == "" then
+		return nil
+	end
+
+	local quantity = nil
+	local itemNumber = slot:FindFirstChild("ItemNumber")
+	local numberLabel = itemNumber and itemNumber:FindFirstChild("Number")
+	if numberLabel and numberLabel:IsA("TextLabel") and numberLabel.Text ~= "" then
+		quantity = numberLabel.Text
+	end
+
+	return name, quantity
+end
+
+local function formatSlotLine(name, quantity)
+	-- ItemNumber.Number.Text contient deja le "x" (ex: "x91"), pas la peine d'en rajouter un.
+	if quantity then
+		return string.format("- %s %s", name, quantity)
+	end
+	return "- " .. name
+end
+
+-- Categories d'objets, verifiees dans cet ordre (mot-cle = sous-chaine,
+-- insensible a la casse) ; tout objet qui ne matche rien tombe dans "Reste".
+local INVENTORY_CATEGORIES = {
+	{ name = "Schematics", keywords = { "schematic" } },
+	{ name = "Items", keywords = { "scalpel", "extraction spoon", "lava snake skin", "samurai soul", "trait scroll", "mastery scroll" } },
+	{ name = "Eyes", keywords = { "rinnegan", "mysterious eye", "sharingan" } },
+	{ name = "Fruits", keywords = { "fruit" } },
+	{ name = "Gems", keywords = { "gem" } },
+	{ name = "Ring", keywords = { "ring" } },
+	{ name = "Soul", keywords = { "memory soul", "progression soul" } },
+}
+
+local function categorizeItemName(name)
+	local lower = name:lower()
+	for _, category in ipairs(INVENTORY_CATEGORIES) do
+		for _, keyword in ipairs(category.keywords) do
+			if lower:find(keyword, 1, true) then
+				return category.name
+			end
+		end
+	end
+	return "Reste"
+end
+
+local function getInventoryText()
+	local lines = {}
+
+	table.insert(lines, "=== Inventaire de " .. LocalPlayer.Name .. " ===")
+	table.insert(lines, os.date("%d/%m/%Y %H:%M:%S"))
+
+	local clientGui = PlayerGui:FindFirstChild("ClientGui")
+	local mainframe = clientGui and clientGui:FindFirstChild("Mainframe")
+
+	-- Inventaire complet, groupe par categorie : PlayerGui.ClientGui.Mainframe.Loadout.Inventory.InventoryScroll.InvSlotN
+	table.insert(lines, "")
+	table.insert(lines, "-- Inventaire (Loadout) --")
+	local invCount = 0
+	local grouped = { Reste = {} }
+	for _, category in ipairs(INVENTORY_CATEGORIES) do
+		grouped[category.name] = {}
+	end
+
+	local loadout = mainframe and mainframe:FindFirstChild("Loadout")
+	local invFrame = loadout and loadout:FindFirstChild("Inventory")
+	local invScroll = invFrame and invFrame:FindFirstChild("InventoryScroll")
+	if invScroll then
+		local slots = {}
+		for _, slot in ipairs(invScroll:GetChildren()) do
+			if slot.Name:match("^InvSlot%d+$") then
+				table.insert(slots, slot)
+			end
+		end
+		table.sort(slots, function(a, b)
+			return tonumber(a.Name:match("%d+")) < tonumber(b.Name:match("%d+"))
+		end)
+		for _, slot in ipairs(slots) do
+			local itemName, quantity = getSlotItemInfo(slot)
+			if itemName then
+				invCount += 1
+				local line = formatSlotLine(itemName, quantity)
+				table.insert(grouped[categorizeItemName(itemName)], line)
+			end
+		end
+	end
+
+	if invCount == 0 then
+		table.insert(lines, "(vide ou introuvable - ouvre ton inventaire en jeu au moins une fois avant de copier)")
+	else
+		for _, category in ipairs(INVENTORY_CATEGORIES) do
+			if #grouped[category.name] > 0 then
+				table.insert(lines, "")
+				table.insert(lines, category.name .. ":")
+				for _, line in ipairs(grouped[category.name]) do
+					table.insert(lines, line)
+				end
+			end
+		end
+		if #grouped.Reste > 0 then
+			table.insert(lines, "")
+			table.insert(lines, "Reste:")
+			for _, line in ipairs(grouped.Reste) do
+				table.insert(lines, line)
+			end
+		end
+	end
+
+	-- Hotbar equipee : PlayerGui.ClientGui.Mainframe.Loadout.HUD.Slot1..Slot12
+	table.insert(lines, "")
+	table.insert(lines, "-- Hotbar equipee --")
+	local hudCount = 0
+	local hud = loadout and loadout:FindFirstChild("HUD")
+	if hud then
+		for i = 1, 12 do
+			local itemName, quantity = getSlotItemInfo(hud:FindFirstChild("Slot" .. i))
+			if itemName then
+				hudCount += 1
+				-- Ici le numero est la touche du raccourci (utile), contrairement au numero de slot d'inventaire.
+				local suffix = quantity and (" " .. quantity) or ""
+				table.insert(lines, string.format("- [%d] %s%s", i, itemName, suffix))
+			end
+		end
+	end
+	if hudCount == 0 then
+		table.insert(lines, "(aucun raccourci equipe)")
+	end
+
+	-- Lifeforce : PlayerGui.ClientGui.Mainframe.HUD.LifeForce.Value (IntValue, pourcentage)
+	table.insert(lines, "")
+	table.insert(lines, "-- Lifeforce --")
+	local lifeForceValue = hud and hud:FindFirstChild("LifeForce") and hud.LifeForce:FindFirstChild("Value")
+	if lifeForceValue and lifeForceValue:IsA("ValueBase") then
+		table.insert(lines, string.format("- %s%%", tostring(lifeForceValue.Value)))
+	else
+		table.insert(lines, "(introuvable)")
+	end
+
+	return table.concat(lines, "\n")
+end
+
+-- Un embed Discord est limite a 4096 caracteres en description : on tronque
+-- plutot que d'echouer silencieusement sur un inventaire bien rempli.
+local DISCORD_EMBED_DESCRIPTION_LIMIT = 4096
+
+local function sendInventoryToWebhook()
+	if not request then
+		notify("request() indisponible : impossible d'envoyer au webhook.")
+		return
+	end
+
+	local description = getInventoryText()
+	if #description > DISCORD_EMBED_DESCRIPTION_LIMIT then
+		description = description:sub(1, DISCORD_EMBED_DESCRIPTION_LIMIT - 20) .. "\n... (tronque)"
+	end
+
+	local payload = {
+		embeds = {
+			{
+				title = "Inventaire - " .. LocalPlayer.Name,
+				description = description,
+				color = 7513855, -- Theme.Accent (114, 137, 255)
+				timestamp = DateTime.now():ToIsoDate(),
+			},
+		},
+	}
+
+	local ok, response = pcall(request, {
+		Url = INVENTORY_WEBHOOK_URL,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json" },
+		Body = HttpService:JSONEncode(payload),
+	})
+
+	if ok and response and response.StatusCode and response.StatusCode < 300 then
+		notify("Inventaire envoye au webhook Discord.")
+	else
+		notify("Erreur : envoi au webhook Discord a echoue.")
+	end
+end
+
+-- Envoi automatique en arriere-plan, en plus du bouton manuel.
+task.spawn(function()
+	while not unloaded do
+		task.wait(INVENTORY_AUTO_INTERVAL)
+		if unloaded then break end
+		pcall(sendInventoryToWebhook)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- Debug : dump recursif de LocalPlayer + Character, pour reperer ou vit un
+-- systeme de donnees perso (inventaire custom, etc.) sans avoir a fouiller
+-- Dex Explorer a la main. A retirer une fois le vrai chemin trouve.
+--------------------------------------------------------------------------------
+
+local function dumpTree(root, maxDepth)
+	local lines = {}
+	local function walk(inst, depth)
+		local indent = string.rep("  ", depth)
+		local extra = ""
+		if inst:IsA("ValueBase") then
+			extra = " = " .. tostring(inst.Value)
+		elseif (inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")) and inst.Text ~= "" then
+			extra = string.format(" Text=%q", inst.Text)
+		end
+		table.insert(lines, string.format("%s%s [%s]%s", indent, inst.Name, inst.ClassName, extra))
+		if maxDepth and depth >= maxDepth then return end
+		for _, child in ipairs(inst:GetChildren()) do
+			walk(child, depth + 1)
+		end
+	end
+	walk(root, 0)
+	return table.concat(lines, "\n")
+end
+
+local function copyOrPrint(text)
+	if setclipboard then
+		local ok = pcall(setclipboard, text)
+		if ok then
+			notify("Dump copie dans le presse-papier.")
+		else
+			notify("Erreur : setclipboard a echoue. Voir la console (F9).")
+			print(text)
+		end
+	else
+		notify("setclipboard indisponible sur cet executeur. Voir la console (F9).")
+		print(text)
+	end
+end
+
+local function dumpLocalPlayerToClipboard()
+	local lines = {}
+
+	table.insert(lines, "=== Dump LocalPlayer (" .. LocalPlayer.Name .. ") ===")
+	table.insert(lines, os.date("%d/%m/%Y %H:%M:%S"))
+	table.insert(lines, "")
+	table.insert(lines, dumpTree(LocalPlayer, 8))
+
+	local character = LocalPlayer.Character
+	if character then
+		table.insert(lines, "")
+		table.insert(lines, "=== Dump Character ===")
+		table.insert(lines, dumpTree(character, 6))
+	end
+
+	copyOrPrint(table.concat(lines, "\n"))
+end
+
+-- Dump complet (profondeur illimitee, avec le Text de chaque label) du premier
+-- InvSlot rempli : sert a confirmer ou vit exactement la quantite d'un objet
+-- (ItemNumber.Number ?), coupee par la profondeur limitee du dump general.
+local function dumpFirstInventoryItem()
+	local invScroll = PlayerGui
+		:FindFirstChild("ClientGui")
+	invScroll = invScroll and invScroll:FindFirstChild("Mainframe")
+	invScroll = invScroll and invScroll:FindFirstChild("Loadout")
+	invScroll = invScroll and invScroll:FindFirstChild("Inventory")
+	invScroll = invScroll and invScroll:FindFirstChild("InventoryScroll")
+
+	if not invScroll then
+		notify("InventoryScroll introuvable.")
+		return
+	end
+
+	local slots = {}
+	for _, slot in ipairs(invScroll:GetChildren()) do
+		if slot.Name:match("^InvSlot%d+$") then
+			table.insert(slots, slot)
+		end
+	end
+	table.sort(slots, function(a, b)
+		return tonumber(a.Name:match("%d+")) < tonumber(b.Name:match("%d+"))
+	end)
+
+	local target = nil
+	for _, slot in ipairs(slots) do
+		local slotText = slot:FindFirstChild("SlotText")
+		if slotText and slotText:IsA("TextLabel") and slotText.Text ~= "" then
+			target = slot
+			break
+		end
+	end
+
+	if not target then
+		notify("Aucun InvSlot rempli trouve. Ouvre ton inventaire en jeu d'abord.")
+		return
+	end
+
+	local lines = {
+		"=== Dump complet de " .. target.Name .. " (premier slot rempli) ===",
+		os.date("%d/%m/%Y %H:%M:%S"),
+		"",
+		dumpTree(target, nil),
+	}
+	copyOrPrint(table.concat(lines, "\n"))
 end
 
 local Main = create("Frame", {
@@ -1074,6 +1389,16 @@ if #ChakraPointNames > 0 then
 else
 	addLabelRow(ChakraPointsSection, "Aucun ChakraPoints trouve dans workspace.")
 end
+
+local InventorySection = addSection(PlayerPage, "Inventaire")
+addLabelRow(InventorySection, "Envoie Inventaire (Loadout) + Hotbar + Lifeforce au webhook Discord. Auto toutes les 5 min. Astuce : ouvre ton inventaire en jeu une fois pour que les slots se remplissent.")
+addButtonRow(InventorySection, "Envoyer au webhook Discord", sendInventoryToWebhook)
+
+local DebugSection = addSection(OtherPage, "Debug")
+addLabelRow(DebugSection, "Dump recursif de LocalPlayer + Character (pour reperer un systeme d'inventaire perso).")
+addButtonRow(DebugSection, "Dump LocalPlayer", dumpLocalPlayerToClipboard)
+addLabelRow(DebugSection, "Dump complet (sans limite de profondeur) du premier objet trouve dans l'inventaire - pour verifier ou se trouve la quantite.")
+addButtonRow(DebugSection, "Dump 1er item d'inventaire", dumpFirstInventoryItem)
 
 local ConnSection = addSection(OtherPage, "Connexion serveur Python")
 addLabelRow(ConnSection, "Endpoint : " .. OVERLAY_ENDPOINT)
