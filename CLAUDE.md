@@ -29,6 +29,18 @@ regles :
   `local XSection = addSection(...)` suivi de quelques `addXRow(XSection, ...)`)
   dans son propre `do ... end`. Ca libere ses registres a la fin du bloc
   plutot que de les garder ouverts jusqu'a la fin du fichier.
+- Des qu'une section a besoin de PLUSIEURS locals internes (helpers, modules
+  `require`d, tables de lookup) pour construire UNE closure qui sera utilisee
+  plus bas (ex: le handler d'un bouton), forward-declarer cette closure
+  (`local maFonction`) puis la construire a l'interieur d'un `do ... end`
+  imbrique qui capture tous les helpers comme upvalues et se referme aussitot
+  apres (`maFonction = function(...) ... end`). Seule `maFonction` doit
+  survivre en dehors ; tout le reste (le module require, les fonctions de
+  calcul intermediaires...) libere son registre a la fermeture du bloc. Meme
+  pattern que `setAfkAgeUp`/`setPanicTeleport` (haut du fichier) et que les
+  sections "Vendre Tout"/"Spectate Leaderboard" (bloc FEATURE_CONTROLS) - a
+  appliquer par defaut des qu'une section depasse ~4-5 locals internes, pas
+  seulement en reaction a une erreur de compilation.
 - Ne jamais creer une variable locale par controle UI (toggle/slider/dropdown) :
   ecrire directement dans la table partagee `FEATURE_CONTROLS` (voir le bloc
   `local applyFeatureSettings do ... end` dans `Vapel.lua`), comme c'est deja
