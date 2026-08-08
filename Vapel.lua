@@ -1,6 +1,4 @@
-print("DEBUG 1")
 local Players = game:GetService("Players")
-print("DEBUG 2")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
@@ -8,12 +6,9 @@ local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
-print("DEBUG 3")
 
 local LocalPlayer = Players.LocalPlayer
-print("DEBUG 4")
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-print("DEBUG 5")
 
 local Theme = {
 	Background = Color3.fromRGB(19, 19, 23),
@@ -3271,14 +3266,14 @@ end)
 task.spawn(function()
 	while not unloaded do
 		task.wait(15)
-		if unloaded or not ChakraSenseNotifier then continue end
-
-		local cooldownsFolder = ReplicatedStorage:FindFirstChild("Cooldowns")
-		if not cooldownsFolder then continue end
-
-		for _, playerFolder in ipairs(cooldownsFolder:GetChildren()) do
-			if playerFolder:FindFirstChild("Chakra Sense") then
-				notify(string.format("%s a Chakra Sense actif", playerFolder.Name))
+		if not (unloaded or not ChakraSenseNotifier) then
+			local cooldownsFolder = ReplicatedStorage:FindFirstChild("Cooldowns")
+			if cooldownsFolder then
+				for _, playerFolder in ipairs(cooldownsFolder:GetChildren()) do
+					if playerFolder:FindFirstChild("Chakra Sense") then
+						notify(string.format("%s a Chakra Sense actif", playerFolder.Name))
+					end
+				end
 			end
 		end
 	end
