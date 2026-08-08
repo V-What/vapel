@@ -3028,11 +3028,16 @@ do
 		-- d'execution face au notre n'est pas garanti.
 		local setAutoSpectateOnClick
 		do
-			local autoSpectateEnabled = false
-			local connectedEntries = {}
-			local refreshQueued = false
+			-- Toutes les fonctions internes vivent en champs d'une seule table (M)
+			-- plutot qu'en "local function" separees : 8 locals a plat dans ce bloc
+			-- (un par helper) suffisaient a eux seuls a depasser la limite de 200
+			-- registres. `function M.foo(...)` ne cree pas de nouveau local (juste
+			-- une affectation dans la table M deja existante), donc ce bloc entier
+			-- ne coute que 2 registres (state, M) au lieu de 8.
+			local state = { enabled = false, connected = {}, refreshQueued = false }
+			local M = {}
 
-			local function formatDefaultDisplayName(entry)
+			function M.formatDefaultDisplayName(entry)
 				local title = entry.Title or ""
 				if title == "" then return entry.GameName end
 				if title:sub(1, 6) == "of the" then
@@ -3041,15 +3046,15 @@ do
 				return entry.GameName .. ", " .. title
 			end
 
-			local function getPlayerListFrame()
+			function M.getPlayerListFrame()
 				local clientGui = PlayerGui:FindFirstChild("ClientGui")
 				local mainframe = clientGui and clientGui:FindFirstChild("Mainframe")
 				local playerList = mainframe and mainframe:FindFirstChild("PlayerList")
 				return playerList and playerList:FindFirstChild("List")
 			end
 
-			local function processEntries()
-				local listFrame = getPlayerListFrame()
+			function M.processEntries()
+				local listFrame = M.getPlayerListFrame()
 				if not listFrame then return end
 
 				local ok, list = pcall(function()
@@ -3060,22 +3065,22 @@ do
 				local idByDisplayName = {}
 				for _, entry in ipairs(list) do
 					if entry.GameName and entry.ID then
-						idByDisplayName[formatDefaultDisplayName(entry)] = entry.ID
+						idByDisplayName[M.formatDefaultDisplayName(entry)] = entry.ID
 					end
 				end
 
 				for _, child in ipairs(listFrame:GetChildren()) do
-					if child:IsA("ImageButton") and not connectedEntries[child] and child:FindFirstChild("PlayerName") then
+					if child:IsA("ImageButton") and not state.connected[child] and child:FindFirstChild("PlayerName") then
 						local id = idByDisplayName[child.PlayerName.Text]
 						if id then
-							connectedEntries[child] = true
+							state.connected[child] = true
 							track(child.MouseButton1Down:Connect(function()
-								if not autoSpectateEnabled then return end
+								if not state.enabled then return end
 								local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
 								if DataEvent then DataEvent:FireServer("observe", id) end
 							end))
 							track(child.Destroying:Connect(function()
-								connectedEntries[child] = nil
+								state.connected[child] = nil
 							end))
 						end
 					end
@@ -3085,28 +3090,28 @@ do
 			-- Le leaderboard se reconstruit en rafale (plusieurs entrees ajoutees
 			-- d'un coup) : on debounce pour ne faire qu'un seul GetPlayerList par
 			-- rafale plutot qu'un par entree.
-			local function scheduleProcessEntries()
-				if refreshQueued then return end
-				refreshQueued = true
+			function M.scheduleProcessEntries()
+				if state.refreshQueued then return end
+				state.refreshQueued = true
 				task.defer(function()
-					refreshQueued = false
-					processEntries()
+					state.refreshQueued = false
+					M.processEntries()
 				end)
 			end
 
-			local function hookPlayerList()
-				local listFrame = getPlayerListFrame()
+			function M.hookPlayerList()
+				local listFrame = M.getPlayerListFrame()
 				if not listFrame then
-					task.delay(2, hookPlayerList) -- PlayerList pas encore charge, on reessaie
+					task.delay(2, M.hookPlayerList) -- PlayerList pas encore charge, on reessaie
 					return
 				end
-				track(listFrame.ChildAdded:Connect(scheduleProcessEntries))
-				scheduleProcessEntries()
+				track(listFrame.ChildAdded:Connect(M.scheduleProcessEntries))
+				M.scheduleProcessEntries()
 			end
-			hookPlayerList()
+			M.hookPlayerList()
 
-			setAutoSpectateOnClick = function(state)
-				autoSpectateEnabled = state
+			setAutoSpectateOnClick = function(newState)
+				state.enabled = newState
 			end
 		end
 
