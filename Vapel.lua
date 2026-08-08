@@ -2789,15 +2789,21 @@ do
 			return npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Main") or npc
 		end
 
+		-- dialogPart n'est qu'une reference d'Instance passee au serveur (utilisee
+		-- pour lire son attribut "Village" et calculer le prix) : rien dans le flux
+		-- observe ne l'exige "proche" de toi. On va donc chercher le PNJ "Merchant"
+		-- (vendeur de base confirme en jeu) directement par son nom dans workspace,
+		-- plutot que de passer par GameManager:findNearbyNPC qui exige d'etre a
+		-- portee - ce qui permet de vendre depuis n'importe ou sur la carte.
+		local MERCHANT_NPC_NAME = "Merchant"
+
+		local function findMerchantNpc()
+			return workspace:FindFirstChild(MERCHANT_NPC_NAME)
+		end
+
 		local SELLABLE_ITEM_TYPES = { "Trinket" }
 
 		local function sellAllOfType(itemType)
-			local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if not rootPart then
-				notify("Personnage introuvable, impossible de vendre.")
-				return
-			end
-
 			local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
 			if not DataFunction then
 				notify("ReplicatedStorage.Events.DataFunction introuvable.")
@@ -2805,8 +2811,8 @@ do
 			end
 
 			local ok, result = pcall(function()
-				local npc = GameManager:findNearbyNPC(rootPart.CFrame)
-				if type(npc) == "boolean" then
+				local npc = findMerchantNpc()
+				if not npc then
 					return "no_npc"
 				end
 				local dialogPart = getNpcDialogPart(npc)
@@ -2830,7 +2836,7 @@ do
 			if not ok then
 				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(result))
 			elseif result == "no_npc" then
-				notify("Aucun PNJ marchand a proximite. Approche-toi d'un vendeur.")
+				notify("PNJ \"" .. MERCHANT_NPC_NAME .. "\" introuvable dans workspace.")
 			elseif result == "no_data" then
 				notify("Impossible de recuperer tes donnees joueur.")
 			elseif result == true then
@@ -2841,7 +2847,7 @@ do
 		end
 
 		local SellAllSection = addSection(AutoPage, "Vendre Tout")
-		addLabelRow(SellAllSection, "Vend d'un coup tout ce que tu possedes du type choisi au PNJ marchand le plus proche. Approche-toi d'un vendeur avant de cliquer.")
+		addLabelRow(SellAllSection, "Vend d'un coup tout ce que tu possedes du type choisi au PNJ Merchant, depuis n'importe ou sur la carte (pas besoin d'etre a cote de lui).")
 		FEATURE_CONTROLS.SelectedSellType = addDropdownRow(SellAllSection, "Type d'objet", SELLABLE_ITEM_TYPES, Settings.SelectedSellType, function(v)
 			Settings.SelectedSellType = v
 		end)
