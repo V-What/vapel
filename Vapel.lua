@@ -3034,7 +3034,7 @@ do
 			-- registres. `function M.foo(...)` ne cree pas de nouveau local (juste
 			-- une affectation dans la table M deja existante), donc ce bloc entier
 			-- ne coute que 2 registres (state, M) au lieu de 8.
-			local state = { enabled = false, connected = {}, refreshQueued = false }
+			local state = { enabled = false, connected = {}, refreshQueued = false, currentId = nil }
 			local M = {}
 
 			function M.formatDefaultDisplayName(entry)
@@ -3051,6 +3051,15 @@ do
 				local mainframe = clientGui and clientGui:FindFirstChild("Mainframe")
 				local playerList = mainframe and mainframe:FindFirstChild("PlayerList")
 				return playerList and playerList:FindFirstChild("List")
+			end
+
+			function M.stopSpectating()
+				state.currentId = nil
+				local character = LocalPlayer.Character
+				local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+				if humanoid then
+					workspace.CurrentCamera.CameraSubject = humanoid
+				end
 			end
 
 			function M.processEntries()
@@ -3076,8 +3085,17 @@ do
 							state.connected[child] = true
 							track(child.MouseButton1Down:Connect(function()
 								if not state.enabled then return end
+								-- Re-clic sur la personne deja spectee : on arrete plutot que
+								-- de renvoyer "observe" (qui ne changerait rien de toute facon).
+								if state.currentId == id then
+									M.stopSpectating()
+									return
+								end
 								local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
-								if DataEvent then DataEvent:FireServer("observe", id) end
+								if DataEvent then
+									DataEvent:FireServer("observe", id)
+									state.currentId = id
+								end
 							end))
 							track(child.Destroying:Connect(function()
 								state.connected[child] = nil
@@ -3116,20 +3134,13 @@ do
 		end
 
 		local SpectateSection = addSection(AutresPage, "Spectate Leaderboard")
-		addLabelRow(SpectateSection, "Choisis un joueur dans le classement du jeu et passe ta camera sur lui. Necessite le Skill \"Chakra Sense\" actif (ou d'etre moderateur) d'apres le jeu - sinon la demande est probablement ignoree par le serveur.")
+		addLabelRow(SpectateSection, "Active, puis clique un joueur dans le leaderboard du jeu (Tab) pour le spectate. Re-clique la meme personne pour arreter. Necessite le Skill \"Chakra Sense\" actif (ou d'etre moderateur) d'apres le jeu - sinon la demande est probablement ignoree par le serveur.")
 		FEATURE_CONTROLS.AutoSpectateOnClick = addToggleRow(SpectateSection, "Auto Spectate au clic (leaderboard du jeu)", Settings.AutoSpectateOnClick, function(state)
 			setAutoSpectateOnClick(state)
 			Settings.AutoSpectateOnClick = state
 		end)
 		local spectateSelector = addTeleportSelector(SpectateSection, "Joueur", "Spectate", getSpectateOptions, spectatePlayer)
 		addButtonRow(SpectateSection, "Actualiser la liste", spectateSelector.Refresh)
-		addButtonRow(SpectateSection, "Arreter le Spectate", function()
-			local character = LocalPlayer.Character
-			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
-			if humanoid then
-				workspace.CurrentCamera.CameraSubject = humanoid
-			end
-		end)
 	end
 
 	-- Pousse une config chargee vers l'UI (declenche l'onChange normal de
