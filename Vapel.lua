@@ -829,18 +829,23 @@ ScreenGui.Parent = PlayerGui
 -- Teleport, qui peut notifier plusieurs fois par seconde).
 --------------------------------------------------------------------------------
 
-local TOAST_WIDTH = 320
-local TOAST_KIND_STYLE = {
-	info = { Color = Theme.Accent, Glyph = "●" },
-	success = { Color = Theme.Success, Glyph = "✓" },
-	error = { Color = Theme.Danger, Glyph = "✕" },
+-- Regroupees dans une seule table plutot que des locals separes : le fichier
+-- entier est une seule fonction Luau (limite de 200 registres locaux), voir
+-- la note en tete de fichier.
+local TOAST = {
+	Width = 320,
+	Kinds = {
+		info = { Color = Theme.Accent, Glyph = "●" },
+		success = { Color = Theme.Success, Glyph = "✓" },
+		error = { Color = Theme.Danger, Glyph = "✕" },
+	},
 }
 local activeToasts = {} -- max 4 toasts visibles simultanement (voir notify)
 
 local ToastHolder = create("Frame", {
 	AnchorPoint = Vector2.new(1, 1),
 	Position = UDim2.new(1, -13, 1, -13),
-	Size = UDim2.new(0, TOAST_WIDTH, 0, 460),
+	Size = UDim2.new(0, TOAST.Width, 0, 460),
 	BackgroundTransparency = 1,
 }, ScreenGui)
 create("UIListLayout", {
@@ -855,7 +860,7 @@ create("UIListLayout", {
 local function notify(text, kind, duration)
 	if unloaded then return end
 	duration = duration or 3.5
-	local style = TOAST_KIND_STYLE[kind] or TOAST_KIND_STYLE.info
+	local style = TOAST.Kinds[kind] or TOAST.Kinds.info
 
 	-- Rafale de notifications : on vire tout de suite les plus anciennes en
 	-- trop plutot que de laisser la pile grossir indefiniment.
@@ -918,7 +923,7 @@ local function notify(text, kind, duration)
 	}, IconChip)
 
 	local label = create("TextLabel", {
-		Size = UDim2.new(0, TOAST_WIDTH - 24 - 26 - 10, 0, 0),
+		Size = UDim2.new(0, TOAST.Width - 24 - 26 - 10, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Text = text,
@@ -945,7 +950,7 @@ local function notify(text, kind, duration)
 	}, ProgressTrack)
 	corner(ProgressFill, 2)
 
-	tweenStyled(toast, { Size = UDim2.new(0, TOAST_WIDTH, 0, 0), BackgroundTransparency = 0 }, 0.25)
+	tweenStyled(toast, { Size = UDim2.new(0, TOAST.Width, 0, 0), BackgroundTransparency = 0 }, 0.25)
 	tween(stroke, { Transparency = 0.35 }, 0.2)
 	tween(iconStroke, { Transparency = 0.4 }, 0.2)
 	tween(IconChip, { BackgroundTransparency = 0.85 }, 0.2)
@@ -2842,93 +2847,101 @@ do
 		-- GameManager est un ModuleScript ordinaire sous ReplicatedStorage (require(
 		-- ReplicatedStorage.GameManager) dans le dump), donc requerable directement
 		-- ici comme le vrai client le fait, plutot que de deviner le calcul de prix.
-		local GameManager = require(ReplicatedStorage.GameManager)
-
-		local function lookupVillageData(villageData, month, week, village)
-			return villageData["Month" .. month]["Week" .. week][village]
-		end
-
-		local function getEconomy(villageData, month, week, village)
-			if village == "Rogue" then return "Struggling" end
-			if village == "Neutral" or not village then return "Average" end
-			return lookupVillageData(villageData, month, week, village).Politics.Economy
-		end
-
-		local function getVillageRelationship(villageData, month, week, villageA, villageB)
-			if not (villageA and villageB) then return nil end
-			if villageA == "Rogue" or villageB == "Rogue" then return "War" end
-			if villageA == "Neutral" or villageB == "Neutral" then return "Neutral" end
-			if villageA == villageB then return "Own" end
-
-			local dataA = lookupVillageData(villageData, month, week, villageA)
-			local dataB = lookupVillageData(villageData, month, week, villageB)
-			if table.find(dataA.Politics.Alliances, villageB) or table.find(dataB.Politics.Alliances, villageA) then
-				return "Allied"
-			end
-			if table.find(dataA.Politics.Wars, villageB) or table.find(dataB.Politics.Wars, villageA) then
-				return "War"
-			end
-			return "Neutral"
-		end
-
-		local function getNpcDialogPart(npc)
-			return npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Main") or npc
-		end
-
-		-- dialogPart n'est qu'une reference d'Instance passee au serveur (utilisee
-		-- pour lire son attribut "Village" et calculer le prix) : rien dans le flux
-		-- observe ne l'exige "proche" de toi. On va donc chercher le PNJ "Merchant"
-		-- (vendeur de base confirme en jeu) directement par son nom dans workspace,
-		-- plutot que de passer par GameManager:findNearbyNPC qui exige d'etre a
-		-- portee - ce qui permet de vendre depuis n'importe ou sur la carte.
-		local MERCHANT_NPC_NAME = "Merchant"
-
-		local function findMerchantNpc()
-			return workspace:FindFirstChild(MERCHANT_NPC_NAME)
-		end
-
+		-- Locals internes (GameManager, helpers de prix, resolution du PNJ) isoles
+		-- dans un do...end imbrique : seuls SELLABLE_ITEM_TYPES et sellAllOfType
+		-- doivent survivre pour construire l'UI plus bas, le reste peut liberer
+		-- son registre des que la closure sellAllOfType est construite (meme
+		-- pattern que setAfkAgeUp/setPanicTeleport plus haut dans le fichier).
 		local SELLABLE_ITEM_TYPES = { "Trinket" }
+		local sellAllOfType
 
-		local function sellAllOfType(itemType)
-			local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
-			if not DataFunction then
-				notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
-				return
+		do
+			local GameManager = require(ReplicatedStorage.GameManager)
+
+			local function lookupVillageData(villageData, month, week, village)
+				return villageData["Month" .. month]["Week" .. week][village]
 			end
 
-			local ok, result = pcall(function()
-				local npc = findMerchantNpc()
-				if not npc then
-					return "no_npc"
+			local function getEconomy(villageData, month, week, village)
+				if village == "Rogue" then return "Struggling" end
+				if village == "Neutral" or not village then return "Average" end
+				return lookupVillageData(villageData, month, week, village).Politics.Economy
+			end
+
+			local function getVillageRelationship(villageData, month, week, villageA, villageB)
+				if not (villageA and villageB) then return nil end
+				if villageA == "Rogue" or villageB == "Rogue" then return "War" end
+				if villageA == "Neutral" or villageB == "Neutral" then return "Neutral" end
+				if villageA == villageB then return "Own" end
+
+				local dataA = lookupVillageData(villageData, month, week, villageA)
+				local dataB = lookupVillageData(villageData, month, week, villageB)
+				if table.find(dataA.Politics.Alliances, villageB) or table.find(dataB.Politics.Alliances, villageA) then
+					return "Allied"
 				end
-				local dialogPart = getNpcDialogPart(npc)
+				if table.find(dataA.Politics.Wars, villageB) or table.find(dataB.Politics.Wars, villageA) then
+					return "War"
+				end
+				return "Neutral"
+			end
 
-				local playerData = DataFunction:InvokeServer("GetData")
-				if not playerData then
-					return "no_data"
+			local function getNpcDialogPart(npc)
+				return npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Main") or npc
+			end
+
+			-- dialogPart n'est qu'une reference d'Instance passee au serveur (utilisee
+			-- pour lire son attribut "Village" et calculer le prix) : rien dans le flux
+			-- observe ne l'exige "proche" de toi. On va donc chercher le PNJ "Merchant"
+			-- (vendeur de base confirme en jeu) directement par son nom dans workspace,
+			-- plutot que de passer par GameManager:findNearbyNPC qui exige d'etre a
+			-- portee - ce qui permet de vendre depuis n'importe ou sur la carte.
+			local MERCHANT_NPC_NAME = "Merchant"
+
+			local function findMerchantNpc()
+				return workspace:FindFirstChild(MERCHANT_NPC_NAME)
+			end
+
+			sellAllOfType = function(itemType)
+				local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
+				if not DataFunction then
+					notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
+					return
 				end
 
-				local villageData, month, week = DataFunction:InvokeServer("getVillageData")
-				local npcVillage = dialogPart:GetAttribute("Village")
-				local relationship = getVillageRelationship(villageData, month, week, playerData.Village, npcVillage)
-				local economy = getEconomy(villageData, month, week, npcVillage)
+				local ok, result = pcall(function()
+					local npc = findMerchantNpc()
+					if not npc then
+						return "no_npc"
+					end
+					local dialogPart = getNpcDialogPart(npc)
 
-				local rawValue = GameManager:calculateBulk(playerData.Inventory, playerData.Loadout, itemType, nil)
-				local price = GameManager:getModifiedPrice(rawValue, relationship, economy, "Sell")
+					local playerData = DataFunction:InvokeServer("GetData")
+					if not playerData then
+						return "no_data"
+					end
 
-				return DataFunction:InvokeServer("SellingBulk", price, itemType, nil, dialogPart)
-			end)
+					local villageData, month, week = DataFunction:InvokeServer("getVillageData")
+					local npcVillage = dialogPart:GetAttribute("Village")
+					local relationship = getVillageRelationship(villageData, month, week, playerData.Village, npcVillage)
+					local economy = getEconomy(villageData, month, week, npcVillage)
 
-			if not ok then
-				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(result), "error")
-			elseif result == "no_npc" then
-				notify("PNJ \"" .. MERCHANT_NPC_NAME .. "\" introuvable dans workspace.", "error")
-			elseif result == "no_data" then
-				notify("Impossible de recuperer tes donnees joueur.", "error")
-			elseif result == true then
-				notify("Vente reussie : " .. itemType .. ".", "success")
-			else
-				notify("Vente refusee par le serveur pour : " .. itemType .. ".", "error")
+					local rawValue = GameManager:calculateBulk(playerData.Inventory, playerData.Loadout, itemType, nil)
+					local price = GameManager:getModifiedPrice(rawValue, relationship, economy, "Sell")
+
+					return DataFunction:InvokeServer("SellingBulk", price, itemType, nil, dialogPart)
+				end)
+
+				if not ok then
+					notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(result), "error")
+				elseif result == "no_npc" then
+					notify("PNJ \"" .. MERCHANT_NPC_NAME .. "\" introuvable dans workspace.", "error")
+				elseif result == "no_data" then
+					notify("Impossible de recuperer tes donnees joueur.", "error")
+				elseif result == true then
+					notify("Vente reussie : " .. itemType .. ".", "success")
+				else
+					notify("Vente refusee par le serveur pour : " .. itemType .. ".", "error")
+				end
 			end
 		end
 
@@ -2954,43 +2967,49 @@ do
 		-- par le LocalScript du jeu lui-meme (toujours actif a cote de ce script,
 		-- data.lua ~L10185 : DataEvent.OnClientEvent("Observe", <Player>)), donc
 		-- rien a faire cote client pour appliquer le changement de camera.
-		local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
+		-- DataEvent et spectateTargetsByName ne servent qu'a construire les deux
+		-- closures ci-dessous : isoles dans un do...end imbrique pour liberer
+		-- leurs registres une fois getSpectateOptions/spectatePlayer prets.
+		local getSpectateOptions, spectatePlayer
 
-		local spectateTargetsByName = {}
+		do
+			local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
+			local spectateTargetsByName = {}
 
-		local function getSpectateOptions()
-			spectateTargetsByName = {}
-			local names = {}
+			getSpectateOptions = function()
+				spectateTargetsByName = {}
+				local names = {}
 
-			local ok, list = pcall(function()
-				return ReplicatedStorage.Events.DataFunction:InvokeServer("GetPlayerList")
-			end)
-			if ok and list then
-				for _, entry in ipairs(list) do
-					local displayName = entry.GameName or entry.RealName
-					if displayName and entry.ID and not spectateTargetsByName[displayName] then
-						spectateTargetsByName[displayName] = entry.ID
-						table.insert(names, displayName)
+				local ok, list = pcall(function()
+					return ReplicatedStorage.Events.DataFunction:InvokeServer("GetPlayerList")
+				end)
+				if ok and list then
+					for _, entry in ipairs(list) do
+						local displayName = entry.GameName or entry.RealName
+						if displayName and entry.ID and not spectateTargetsByName[displayName] then
+							spectateTargetsByName[displayName] = entry.ID
+							table.insert(names, displayName)
+						end
 					end
 				end
+
+				table.sort(names)
+				return names
 			end
 
-			table.sort(names)
-			return names
-		end
-
-		local function spectatePlayer(name)
-			local id = spectateTargetsByName[name]
-			if not id then
-				notify("Cible introuvable, actualise la liste.", "error")
-				return
+			spectatePlayer = function(name)
+				local id = spectateTargetsByName[name]
+				if not id then
+					notify("Cible introuvable, actualise la liste.", "error")
+					return
+				end
+				if not DataEvent then
+					notify("ReplicatedStorage.Events.DataEvent introuvable.", "error")
+					return
+				end
+				DataEvent:FireServer("observe", id)
+				notify("Demande de spectate envoyee pour : " .. name .. ".")
 			end
-			if not DataEvent then
-				notify("ReplicatedStorage.Events.DataEvent introuvable.", "error")
-				return
-			end
-			DataEvent:FireServer("observe", id)
-			notify("Demande de spectate envoyee pour : " .. name .. ".")
 		end
 
 		local SpectateSection = addSection(AutresPage, "Spectate Leaderboard")
