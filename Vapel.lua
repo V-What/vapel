@@ -151,6 +151,7 @@ local DEFAULT_FEATURES = {
 	AfkAgeUpEnabled = false,
 	PanicTeleportEnabled = false,
 	SelectedSellType = "Trinket",
+	AutoSpectateOnClick = false,
 }
 
 local Settings = {}
@@ -3012,8 +3013,109 @@ do
 			end
 		end
 
+		-- Auto Spectate au clic : quand actif, cliquer une entree du VRAI
+		-- leaderboard du jeu (Mainframe.PlayerList.List, construit par
+		-- updatePlayerList() dans le dump - data.lua ~L1217) envoie directement
+		-- "observe" pour ce joueur - le gestionnaire natif du jeu reste connecte
+		-- a cote du notre (on ne le remplace pas, on ajoute un declencheur de
+		-- plus), donc ca marche meme quand sa condition (Skill "Chakra Sense" ou
+		-- moderateur) n'est pas remplie.
+		-- Association entree -> ID : capturee des l'apparition de chaque entree
+		-- (avant tout survol, donc le texte y est encore au format par defaut
+		-- "GameName[ Title]" - meme formatage que data.lua ~L1268-1278), en le
+		-- comparant a notre propre GetPlayerList. Ca evite de dependre du texte
+		-- "RealName" revele au survol par le gestionnaire natif, dont l'ordre
+		-- d'execution face au notre n'est pas garanti.
+		local setAutoSpectateOnClick
+		do
+			local autoSpectateEnabled = false
+			local connectedEntries = {}
+			local refreshQueued = false
+
+			local function formatDefaultDisplayName(entry)
+				local title = entry.Title or ""
+				if title == "" then return entry.GameName end
+				if title:sub(1, 6) == "of the" then
+					return entry.GameName .. " " .. title
+				end
+				return entry.GameName .. ", " .. title
+			end
+
+			local function getPlayerListFrame()
+				local clientGui = PlayerGui:FindFirstChild("ClientGui")
+				local mainframe = clientGui and clientGui:FindFirstChild("Mainframe")
+				local playerList = mainframe and mainframe:FindFirstChild("PlayerList")
+				return playerList and playerList:FindFirstChild("List")
+			end
+
+			local function processEntries()
+				local listFrame = getPlayerListFrame()
+				if not listFrame then return end
+
+				local ok, list = pcall(function()
+					return ReplicatedStorage.Events.DataFunction:InvokeServer("GetPlayerList")
+				end)
+				if not (ok and list) then return end
+
+				local idByDisplayName = {}
+				for _, entry in ipairs(list) do
+					if entry.GameName and entry.ID then
+						idByDisplayName[formatDefaultDisplayName(entry)] = entry.ID
+					end
+				end
+
+				for _, child in ipairs(listFrame:GetChildren()) do
+					if child:IsA("ImageButton") and not connectedEntries[child] and child:FindFirstChild("PlayerName") then
+						local id = idByDisplayName[child.PlayerName.Text]
+						if id then
+							connectedEntries[child] = true
+							track(child.MouseButton1Down:Connect(function()
+								if not autoSpectateEnabled then return end
+								local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
+								if DataEvent then DataEvent:FireServer("observe", id) end
+							end))
+							track(child.Destroying:Connect(function()
+								connectedEntries[child] = nil
+							end))
+						end
+					end
+				end
+			end
+
+			-- Le leaderboard se reconstruit en rafale (plusieurs entrees ajoutees
+			-- d'un coup) : on debounce pour ne faire qu'un seul GetPlayerList par
+			-- rafale plutot qu'un par entree.
+			local function scheduleProcessEntries()
+				if refreshQueued then return end
+				refreshQueued = true
+				task.defer(function()
+					refreshQueued = false
+					processEntries()
+				end)
+			end
+
+			local function hookPlayerList()
+				local listFrame = getPlayerListFrame()
+				if not listFrame then
+					task.delay(2, hookPlayerList) -- PlayerList pas encore charge, on reessaie
+					return
+				end
+				track(listFrame.ChildAdded:Connect(scheduleProcessEntries))
+				scheduleProcessEntries()
+			end
+			hookPlayerList()
+
+			setAutoSpectateOnClick = function(state)
+				autoSpectateEnabled = state
+			end
+		end
+
 		local SpectateSection = addSection(AutresPage, "Spectate Leaderboard")
 		addLabelRow(SpectateSection, "Choisis un joueur dans le classement du jeu et passe ta camera sur lui. Necessite le Skill \"Chakra Sense\" actif (ou d'etre moderateur) d'apres le jeu - sinon la demande est probablement ignoree par le serveur.")
+		FEATURE_CONTROLS.AutoSpectateOnClick = addToggleRow(SpectateSection, "Auto Spectate au clic (leaderboard du jeu)", Settings.AutoSpectateOnClick, function(state)
+			setAutoSpectateOnClick(state)
+			Settings.AutoSpectateOnClick = state
+		end)
 		local spectateSelector = addTeleportSelector(SpectateSection, "Joueur", "Spectate", getSpectateOptions, spectatePlayer)
 		addButtonRow(SpectateSection, "Actualiser la liste", spectateSelector.Refresh)
 		addButtonRow(SpectateSection, "Arreter le Spectate", function()
