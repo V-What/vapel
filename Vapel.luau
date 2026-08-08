@@ -270,7 +270,7 @@ local function refreshPlayerLabel(data)
 		data.hpLabel.TextColor3 = healthColor(hp / maxHp)
 		data.hpLabel.Position = UDim2.new(0, 0, 0, y)
 		data.hpLabel.Visible = true
-		y += ROW_HEIGHT
+		y = y + ROW_HEIGHT
 	else
 		data.hpLabel.Visible = false
 	end
@@ -283,7 +283,7 @@ local function refreshPlayerLabel(data)
 			data.distanceLabel.TextColor3 = Theme.SubText
 			data.distanceLabel.Position = UDim2.new(0, 0, 0, y)
 			data.distanceLabel.Visible = true
-			y += ROW_HEIGHT
+			y = y + ROW_HEIGHT
 		else
 			data.distanceLabel.Visible = false
 		end
@@ -303,7 +303,7 @@ local function refreshPlayerLabel(data)
 			data.chakraLabel.TextColor3 = CHAKRA_COLOR
 			data.chakraLabel.Position = UDim2.new(0, 0, 0, y)
 			data.chakraLabel.Visible = true
-			y += ROW_HEIGHT
+			y = y + ROW_HEIGHT
 		else
 			data.chakraLabel.Visible = false
 		end
@@ -319,7 +319,7 @@ local function refreshPlayerLabel(data)
 			data.bloodLabel.TextColor3 = Theme.SubText
 			data.bloodLabel.Position = UDim2.new(0, 0, 0, y)
 			data.bloodLabel.Visible = true
-			y += ROW_HEIGHT
+			y = y + ROW_HEIGHT
 		else
 			data.bloodLabel.Visible = false
 		end
@@ -550,7 +550,7 @@ if request then
 	local writeAccum = 0
 	local requestInFlight = false -- evite d'empiler les requetes si le serveur Python repond lentement
 	track(RunService.Heartbeat:Connect(function(dt)
-		writeAccum += dt
+		writeAccum = writeAccum + dt
 		if writeAccum < OVERLAY_WRITE_INTERVAL then return end
 		writeAccum = 0
 		if requestInFlight then return end
@@ -728,8 +728,8 @@ local function startFly()
 		if not camera then return end
 
 		local verticalAxis = 0
-		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then verticalAxis += 1 end
-		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then verticalAxis -= 1 end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then verticalAxis = verticalAxis + 1 end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then verticalAxis = verticalAxis - 1 end
 
 		local cameraMoveVector = camera.CFrame:VectorToWorldSpace(getFlyMoveVector())
 		flyVelocity.Velocity = (cameraMoveVector + Vector3.new(0, verticalAxis, 0)) * FlySpeed
@@ -1093,7 +1093,7 @@ local function getInventoryText()
 		for _, slot in ipairs(slots) do
 			local itemName, quantity = getSlotItemInfo(slot)
 			if itemName then
-				invCount += 1
+				invCount = invCount + 1
 				local line = formatSlotLine(itemName, quantity)
 				table.insert(grouped[categorizeItemName(itemName)], line)
 			end
@@ -1130,7 +1130,7 @@ local function getInventoryText()
 		for i = 1, 12 do
 			local itemName, quantity = getSlotItemInfo(hud:FindFirstChild("Slot" .. i))
 			if itemName then
-				hudCount += 1
+				hudCount = hudCount + 1
 				-- Ici le numero est la touche du raccourci (utile), contrairement au numero de slot d'inventaire.
 				local suffix = quantity and (" " .. quantity) or ""
 				table.insert(lines, string.format("- [%d] %s%s", i, itemName, suffix))
@@ -2128,7 +2128,7 @@ local function addDropdownRow(content, text, options, default, onChange)
 	local function visibleOptionCount()
 		local count = 0
 		for _, btn in ipairs(optionButtons) do
-			if btn.Visible then count += 1 end
+			if btn.Visible then count = count + 1 end
 		end
 		return count
 	end
@@ -2874,7 +2874,7 @@ do
 					truncated = true
 					return
 				end
-				visited += 1
+				visited = visited + 1
 				if inst.Name:lower():find(lowerQuery, 1, true) then
 					table.insert(matches, inst)
 				end
