@@ -822,23 +822,47 @@ ScreenGui.Parent = PlayerGui
 
 --------------------------------------------------------------------------------
 -- Toasts (notifications) - utilises par ChakraSenseNotifier
+-- Chaque toast a une puce coloree (info/succes/erreur) et une barre de
+-- progression en bas qui se vide en temps reel, pour visualiser le temps
+-- restant avant disparition. Un nombre max de toasts visibles evite
+-- l'accumulation sans fin quand une feature notifie en rafale (ex: Panic
+-- Teleport, qui peut notifier plusieurs fois par seconde).
 --------------------------------------------------------------------------------
+
+local TOAST_WIDTH = 320
+local TOAST_KIND_STYLE = {
+	info = { Color = Theme.Accent, Glyph = "●" },
+	success = { Color = Theme.Success, Glyph = "✓" },
+	error = { Color = Theme.Danger, Glyph = "✕" },
+}
+local activeToasts = {} -- max 4 toasts visibles simultanement (voir notify)
 
 local ToastHolder = create("Frame", {
 	AnchorPoint = Vector2.new(1, 1),
 	Position = UDim2.new(1, -13, 1, -13),
-	Size = UDim2.new(0, 280, 0, 400),
+	Size = UDim2.new(0, TOAST_WIDTH, 0, 460),
 	BackgroundTransparency = 1,
 }, ScreenGui)
 create("UIListLayout", {
-	Padding = UDim.new(0, 6),
+	Padding = UDim.new(0, 8),
 	HorizontalAlignment = Enum.HorizontalAlignment.Right,
 	VerticalAlignment = Enum.VerticalAlignment.Bottom,
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, ToastHolder)
 
-local function notify(text)
+-- kind : "info" (defaut), "success" ou "error". duration : secondes avant
+-- disparition (defaut 3.5).
+local function notify(text, kind, duration)
 	if unloaded then return end
+	duration = duration or 3.5
+	local style = TOAST_KIND_STYLE[kind] or TOAST_KIND_STYLE.info
+
+	-- Rafale de notifications : on vire tout de suite les plus anciennes en
+	-- trop plutot que de laisser la pile grossir indefiniment.
+	while #activeToasts >= 4 do
+		local oldest = table.remove(activeToasts, 1)
+		if oldest and oldest.Parent then oldest:Destroy() end
+	end
 
 	local toast = create("Frame", {
 		Size = UDim2.new(0, 0, 0, 0),
@@ -847,38 +871,99 @@ local function notify(text)
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 	}, ToastHolder)
-	corner(toast, 8)
+	corner(toast, 10)
 	local stroke = create("UIStroke", { Color = Theme.Stroke, Transparency = 1 }, toast)
 	create("UIPadding", {
-		PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-		PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10),
+		PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+		PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+	}, toast)
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		Padding = UDim.new(0, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, toast)
 
-	local accentBar = create("Frame", { Size = UDim2.new(0, 3, 1, 0), BackgroundColor3 = Theme.Accent }, toast)
-	corner(accentBar, 2)
+	table.insert(activeToasts, toast)
+
+	local HeaderRow = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		LayoutOrder = 1,
+	}, toast)
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, HeaderRow)
+
+	local IconChip = create("Frame", {
+		Size = UDim2.new(0, 26, 0, 26),
+		BackgroundColor3 = style.Color,
+		BackgroundTransparency = 1,
+		LayoutOrder = 1,
+	}, HeaderRow)
+	corner(IconChip, 13)
+	local iconStroke = create("UIStroke", { Color = style.Color, Transparency = 1 }, IconChip)
+	local glyph = create("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Text = style.Glyph,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextColor3 = style.Color,
+		TextTransparency = 1,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+	}, IconChip)
 
 	local label = create("TextLabel", {
-		Position = UDim2.new(0, 10, 0, 0),
-		Size = UDim2.new(1, -10, 0, 0),
+		Size = UDim2.new(0, TOAST_WIDTH - 24 - 26 - 10, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
-		TextSize = 13,
+		TextSize = 14,
 		TextColor3 = Theme.Text,
 		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTransparency = 1,
+		LayoutOrder = 2,
+	}, HeaderRow)
+
+	local ProgressTrack = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 4),
+		BackgroundColor3 = Theme.Element,
+		BackgroundTransparency = 1,
+		LayoutOrder = 2,
 	}, toast)
+	corner(ProgressTrack, 2)
+	local ProgressFill = create("Frame", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundColor3 = style.Color,
+		BackgroundTransparency = 1,
+	}, ProgressTrack)
+	corner(ProgressFill, 2)
 
-	tweenStyled(toast, { Size = UDim2.new(0, 260, 0, 0), BackgroundTransparency = 0 }, 0.25)
+	tweenStyled(toast, { Size = UDim2.new(0, TOAST_WIDTH, 0, 0), BackgroundTransparency = 0 }, 0.25)
 	tween(stroke, { Transparency = 0.35 }, 0.2)
+	tween(iconStroke, { Transparency = 0.4 }, 0.2)
+	tween(IconChip, { BackgroundTransparency = 0.85 }, 0.2)
+	tween(glyph, { TextTransparency = 0 }, 0.22)
 	tween(label, { TextTransparency = 0 }, 0.22)
+	tween(ProgressTrack, { BackgroundTransparency = 0 }, 0.2)
+	tween(ProgressFill, { BackgroundTransparency = 0.15 }, 0.2)
+	-- Linear et duree exacte : la barre reflete le temps restant reel, pas un effet decoratif.
+	TweenService:Create(ProgressFill, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 1, 0) }):Play()
 
-	task.delay(3, function()
+	task.delay(duration, function()
 		if not toast.Parent then return end
+		local index = table.find(activeToasts, toast)
+		if index then table.remove(activeToasts, index) end
 		tween(toast, { BackgroundTransparency = 1, Size = UDim2.new(0, 0, 0, 0) }, 0.18)
 		tween(stroke, { Transparency = 1 }, 0.18)
 		tween(label, { TextTransparency = 1 }, 0.12)
+		tween(glyph, { TextTransparency = 1 }, 0.12)
 		task.wait(0.18)
 		toast:Destroy()
 	end)
@@ -896,14 +981,14 @@ local function setSafeSpot()
 	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then return end
 	SafeSpotPosition = rootPart.Position
-	notify("Safe Spot enregistre.")
+	notify("Safe Spot enregistre.", "success")
 end
 
 local function teleportToSafeSpot()
 	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then return end
 	if not SafeSpotPosition then
-		notify("Aucun Safe Spot enregistre.")
+		notify("Aucun Safe Spot enregistre.", "error")
 		return
 	end
 	rootPart.CFrame = CFrame.new(SafeSpotPosition)
@@ -918,11 +1003,11 @@ local function teleportToPlayer(targetPlayer)
 	local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 	local targetRoot = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
 	if not myRoot then
-		notify("Personnage introuvable.")
+		notify("Personnage introuvable.", "error")
 		return
 	end
 	if not targetRoot then
-		notify(targetPlayer.Name .. " n'a pas de personnage charge.")
+		notify(targetPlayer.Name .. " n'a pas de personnage charge.", "error")
 		return
 	end
 	-- Petit decalage devant la cible pour ne pas apparaitre a l'interieur.
@@ -950,14 +1035,14 @@ end
 local function teleportToNpc(name)
 	local npc = NpcsByName[name]
 	if not npc then
-		notify("PNJ introuvable.")
+		notify("PNJ introuvable.", "error")
 		return
 	end
 	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then return end
 	local main = getNpcTeleportPart(npc)
 	if not main then
-		notify("Impossible de localiser ce PNJ.")
+		notify("Impossible de localiser ce PNJ.", "error")
 		return
 	end
 	rootPart.CFrame = CFrame.new(main.Position + Vector3.new(0, 0, -5), main.Position)
@@ -1016,7 +1101,7 @@ local function teleportToChakraPoint()
 
 	local pos = ChakraPointPositions[SelectedChakraPoint]
 	if not pos then
-		notify("Aucun Chakra Point selectionne.")
+		notify("Aucun Chakra Point selectionne.", "error")
 		return
 	end
 
@@ -1185,11 +1270,11 @@ local DISCORD_EMBED_DESCRIPTION_LIMIT = 4096
 
 local function sendInventoryToWebhook()
 	if not request then
-		notify("request() indisponible : impossible d'envoyer au webhook.")
+		notify("request() indisponible : impossible d'envoyer au webhook.", "error")
 		return
 	end
 	if not Prefs.InventoryWebhookUrl or Prefs.InventoryWebhookUrl == "" then
-		notify("Aucun webhook configure (page Settings).")
+		notify("Aucun webhook configure (page Settings).", "error")
 		return
 	end
 
@@ -1217,9 +1302,9 @@ local function sendInventoryToWebhook()
 	})
 
 	if ok and response and response.StatusCode and response.StatusCode < 300 then
-		notify("Inventaire envoye au webhook Discord.")
+		notify("Inventaire envoye au webhook Discord.", "success")
 	else
-		notify("Erreur : envoi au webhook Discord a echoue.")
+		notify("Erreur : envoi au webhook Discord a echoue.", "error")
 	end
 end
 
@@ -1275,13 +1360,13 @@ local function copyOrPrint(text)
 	if setclipboard then
 		local ok = pcall(setclipboard, text)
 		if ok then
-			notify("Dump copie dans le presse-papier.")
+			notify("Dump copie dans le presse-papier.", "success")
 		else
-			notify("Erreur : setclipboard a echoue. Voir la console (F9).")
+			notify("Erreur : setclipboard a echoue. Voir la console (F9).", "error")
 			print(text)
 		end
 	else
-		notify("setclipboard indisponible sur cet executeur. Voir la console (F9).")
+		notify("setclipboard indisponible sur cet executeur. Voir la console (F9).", "error")
 		print(text)
 	end
 end
@@ -1316,7 +1401,7 @@ local function dumpFirstInventoryItem()
 	invScroll = invScroll and invScroll:FindFirstChild("InventoryScroll")
 
 	if not invScroll then
-		notify("InventoryScroll introuvable.")
+		notify("InventoryScroll introuvable.", "error")
 		return
 	end
 
@@ -1340,7 +1425,7 @@ local function dumpFirstInventoryItem()
 	end
 
 	if not target then
-		notify("Aucun InvSlot rempli trouve. Ouvre ton inventaire en jeu d'abord.")
+		notify("Aucun InvSlot rempli trouve. Ouvre ton inventaire en jeu d'abord.", "error")
 		return
 	end
 
@@ -1407,7 +1492,7 @@ do
 		if state then
 			-- Teleportation immediate a l'activation, pas seulement quand un joueur approche.
 			teleportToRandomSafePlace()
-			notify("AFK AgeUp active : teleportation vers une Safe Place.")
+			notify("AFK AgeUp active : teleportation vers une Safe Place.", "success")
 
 			conn = track(RunService.Heartbeat:Connect(function()
 				if os.clock() - lastTeleport < AFK_AGEUP_COOLDOWN then return end
@@ -1466,7 +1551,7 @@ do
 			if panicking then
 				if humanoid.Health >= PANIC_HP_RECOVER then
 					panicking = false
-					notify("Panic Teleport : PV recuperes, arret.")
+					notify("Panic Teleport : PV recuperes, arret.", "success")
 					return
 				end
 				if os.clock() - lastPanicTeleport >= PANIC_TELEPORT_INTERVAL then
@@ -1475,7 +1560,7 @@ do
 				end
 			elseif humanoid.Health < PANIC_HP_LOW then
 				panicking = true
-				notify("Panic Teleport : PV bas, teleportation d'urgence.")
+				notify("Panic Teleport : PV bas, teleportation d'urgence.", "error")
 				teleportToNextSafePlace()
 				lastPanicTeleport = os.clock()
 			end
@@ -2499,7 +2584,7 @@ local function addTeleportSelector(section, label, buttonText, getOptions, onTel
 
 	local teleportButton = addButtonRow(section, buttonText, function()
 		if not selected then
-			notify("Aucune cible selectionnee.")
+			notify("Aucune cible selectionnee.", "error")
 			return
 		end
 		onTeleport(selected)
@@ -2669,7 +2754,7 @@ do
 			function(name)
 				local target = Players:FindFirstChild(name)
 				if not target then
-					notify("Joueur introuvable.")
+					notify("Joueur introuvable.", "error")
 					return
 				end
 				teleportToPlayer(target)
@@ -2806,7 +2891,7 @@ do
 		local function sellAllOfType(itemType)
 			local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
 			if not DataFunction then
-				notify("ReplicatedStorage.Events.DataFunction introuvable.")
+				notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
 				return
 			end
 
@@ -2834,15 +2919,15 @@ do
 			end)
 
 			if not ok then
-				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(result))
+				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(result), "error")
 			elseif result == "no_npc" then
-				notify("PNJ \"" .. MERCHANT_NPC_NAME .. "\" introuvable dans workspace.")
+				notify("PNJ \"" .. MERCHANT_NPC_NAME .. "\" introuvable dans workspace.", "error")
 			elseif result == "no_data" then
-				notify("Impossible de recuperer tes donnees joueur.")
+				notify("Impossible de recuperer tes donnees joueur.", "error")
 			elseif result == true then
-				notify("Vente reussie : " .. itemType .. ".")
+				notify("Vente reussie : " .. itemType .. ".", "success")
 			else
-				notify("Vente refusee par le serveur pour : " .. itemType .. ".")
+				notify("Vente refusee par le serveur pour : " .. itemType .. ".", "error")
 			end
 		end
 
@@ -2966,11 +3051,11 @@ do
 				function()
 					local data = loadConfigData(name)
 					if not data then
-						notify("Impossible de charger '" .. name .. "'.")
+						notify("Impossible de charger '" .. name .. "'.", "error")
 						return
 					end
 					applyFeatureSettings(data)
-					notify("Config '" .. name .. "' chargee.")
+					notify("Config '" .. name .. "' chargee.", "success")
 				end,
 				function()
 					Meta.defaultConfig = (Meta.defaultConfig == name) and nil or name
@@ -2980,7 +3065,7 @@ do
 				end,
 				function()
 					deleteConfig(name)
-					notify("Config '" .. name .. "' supprimee.")
+					notify("Config '" .. name .. "' supprimee.", "success")
 					refreshConfigList()
 				end
 			)
@@ -2990,11 +3075,11 @@ do
 	addButtonRow(ConfigSection, "Enregistrer la config actuelle", function()
 		local name = sanitizeConfigName(ConfigNameBox.Text)
 		if name == "" then
-			notify("Donne un nom a ta config avant d'enregistrer.")
+			notify("Donne un nom a ta config avant d'enregistrer.", "error")
 			return
 		end
 		saveConfig(name)
-		notify("Config '" .. name .. "' enregistree.")
+		notify("Config '" .. name .. "' enregistree.", "success")
 		refreshConfigList()
 	end)
 
@@ -3070,25 +3155,29 @@ do
 	addButtonRow(WebhookSection, "Enregistrer le webhook", function()
 		local url = WebhookUrlBox.Text
 		if url == "" then
-			notify("Le lien webhook ne peut pas etre vide.")
+			notify("Le lien webhook ne peut pas etre vide.", "error")
 			return
 		end
 		Prefs.InventoryWebhookUrl = url
 		savePrefs()
-		notify("Webhook enregistre.")
+		notify("Webhook enregistre.", "success")
 	end)
 
 	addButtonRow(WebhookSection, "Copier le webhook actuel", function()
 		local url = Prefs.InventoryWebhookUrl or ""
 		if url == "" then
-			notify("Aucun webhook configure.")
+			notify("Aucun webhook configure.", "error")
 			return
 		end
 		if setclipboard then
 			local ok = pcall(setclipboard, url)
-			notify(ok and "Webhook copie dans le presse-papier." or "Erreur : setclipboard a echoue.")
+			if ok then
+				notify("Webhook copie dans le presse-papier.", "success")
+			else
+				notify("Erreur : setclipboard a echoue.", "error")
+			end
 		else
-			notify("setclipboard indisponible. Webhook affiche en console (F9).")
+			notify("setclipboard indisponible. Webhook affiche en console (F9).", "error")
 			print(url)
 		end
 	end)
