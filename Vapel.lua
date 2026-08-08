@@ -125,6 +125,7 @@ local DEFAULT_FEATURES = {
 	FlyEnabled = false,
 	FlySpeed = 100,
 	AfkAgeUpEnabled = false,
+	PanicTeleportEnabled = false,
 }
 
 local Settings = {}
@@ -1038,7 +1039,7 @@ end
 -- insensible a la casse) ; tout objet qui ne matche rien tombe dans "Reste".
 local INVENTORY_CATEGORIES = {
 	{ name = "Schematics", keywords = { "schematic" } },
-	{ name = "Items", keywords = { "scalpel", "extraction spoon", "lava snake skin", "samurai soul", "trait scroll", "mastery scroll" } },
+	{ name = "Items", keywords = { "scalpel", "extraction spoon", "snakeskin", "chakra heart", "lava snakeskin", "samurai soul", "trait scroll", "mastery scroll" } },
 	{ name = "Eyes", keywords = { "rinnegan", "mysterious eye", "sharingan" } },
 	{ name = "Fruits", keywords = { "fruit" } },
 	{ name = "Gems", keywords = { "gem" } },
@@ -1221,6 +1222,19 @@ local function dumpTree(root, maxDepth)
 			extra = " = " .. tostring(inst.Value)
 		elseif (inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")) and inst.Text ~= "" then
 			extra = string.format(" Text=%q", inst.Text)
+		elseif inst:IsA("Weld") or inst:IsA("Motor6D") or inst:IsA("WeldConstraint") then
+			-- Part0/Part1 : indispensable pour savoir a quel os/part un cosmetique
+			-- (masque, skin d'arme...) est reellement accroche, plutot que de deviner.
+			local p0 = inst.Part0 and inst.Part0.Name or "nil"
+			local p1 = inst.Part1 and inst.Part1.Name or "nil"
+			extra = string.format(" Part0=%s Part1=%s", p0, p1)
+		elseif inst:IsA("MeshPart") then
+			extra = string.format(" MeshId=%s TextureID=%s Transparency=%s Size=%s",
+				tostring(inst.MeshId), tostring(inst.TextureID), tostring(inst.Transparency), tostring(inst.Size))
+		elseif inst:IsA("SpecialMesh") then
+			extra = string.format(" MeshId=%s TextureId=%s", tostring(inst.MeshId), tostring(inst.TextureId))
+		elseif inst:IsA("BasePart") then
+			extra = string.format(" Transparency=%s Size=%s", tostring(inst.Transparency), tostring(inst.Size))
 		end
 		table.insert(lines, string.format("%s%s [%s]%s", indent, inst.Name, inst.ClassName, extra))
 		if maxDepth and depth >= maxDepth then return end
@@ -1377,6 +1391,70 @@ do
 				notify("AFK AgeUp : joueur detecte a proximite, teleportation.")
 			end))
 		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Panic Teleport : des que les PV du joueur local passent sous 50, sautille
+-- toutes les 0.25s entre les SAFE_PLACES (pour eviter d'etre touche/suivi) ;
+-- s'arrete des que les PV repassent au-dessus de 100.
+--------------------------------------------------------------------------------
+
+local setPanicTeleport
+do
+	local PANIC_HP_LOW = 50
+	local PANIC_HP_RECOVER = 100
+	local PANIC_TELEPORT_INTERVAL = 0.1
+
+	local watchConn = nil
+	local panicking = false
+	local panicIndex = 0
+	local lastPanicTeleport = 0
+
+	local function getHumanoid()
+		local character = LocalPlayer.Character
+		return character and character:FindFirstChildWhichIsA("Humanoid")
+	end
+
+	-- Cycle dans l'ordre (pas aleatoire) pour bien sautiller entre les 8
+	-- endroits plutot que de risquer de retomber deux fois de suite au meme.
+	local function teleportToNextSafePlace()
+		local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if not rootPart then return end
+		panicIndex = (panicIndex % #SAFE_PLACES) + 1
+		rootPart.CFrame = CFrame.new(SAFE_PLACES[panicIndex])
+	end
+
+	setPanicTeleport = function(state)
+		if watchConn then
+			watchConn:Disconnect()
+			watchConn = nil
+		end
+		panicking = false
+
+		if not state then return end
+
+		watchConn = track(RunService.Heartbeat:Connect(function()
+			local humanoid = getHumanoid()
+			if not humanoid then return end
+
+			if panicking then
+				if humanoid.Health >= PANIC_HP_RECOVER then
+					panicking = false
+					notify("Panic Teleport : PV recuperes, arret.")
+					return
+				end
+				if os.clock() - lastPanicTeleport >= PANIC_TELEPORT_INTERVAL then
+					teleportToNextSafePlace()
+					lastPanicTeleport = os.clock()
+				end
+			elseif humanoid.Health < PANIC_HP_LOW then
+				panicking = true
+				notify("Panic Teleport : PV bas, teleportation d'urgence.")
+				teleportToNextSafePlace()
+				lastPanicTeleport = os.clock()
+			end
+		end))
 	end
 end
 
@@ -2413,6 +2491,7 @@ end
 local VisualsPage = createCategory("Visuels", Theme.Accent)
 local PlayerPage = createCategory("Joueur", Color3.fromRGB(196, 120, 255))
 local AutoPage = createCategory("Auto", Color3.fromRGB(255, 175, 70))
+local SkinPage = createCategory("Skin", Color3.fromRGB(255, 120, 170))
 local SettingsPage = createCategory("Settings", Theme.Success)
 
 --------------------------------------------------------------------------------
@@ -2601,6 +2680,13 @@ do
 		Settings.AfkAgeUpEnabled = state
 	end)
 
+	local PanicTeleportSection = addSection(AutoPage, "Panic Teleport")
+	addLabelRow(PanicTeleportSection, "Des que tes PV passent sous 50, teleportation toutes les 0.1s entre les Safe Places. S'arrete quand tes PV repassent au-dessus de 100.")
+	FEATURE_CONTROLS.PanicTeleportEnabled = addToggleRow(PanicTeleportSection, "Panic Teleport", Settings.PanicTeleportEnabled, function(state)
+		setPanicTeleport(state)
+		Settings.PanicTeleportEnabled = state
+	end)
+
 	-- Pousse une config chargee vers l'UI (declenche l'onChange normal de
 	-- chaque controle, qui applique l'effet reel) sans dupliquer la logique.
 	applyFeatureSettings = function(data)
@@ -2744,6 +2830,316 @@ do
 	end)
 
 	refreshConfigList()
+end
+
+--------------------------------------------------------------------------------
+-- Skin : Recherche (dump exploratoire, colle le resultat pour analyse) +
+-- Skin d'arme (equipement reel). D'apres le dump de "Golden Zabunagi" :
+-- l'arme portee est un simple MeshPart accroche au perso par un Motor6D
+-- (Part0="Main"), avec juste un MeshId/TextureID/Size/Color/Material dessus -
+-- pas de systeme d'accessoires/welds complexe comme suppose au debut (c'est
+-- d'ailleurs pourquoi le premier essai base sur Humanoid:AddAccessory /
+-- MeshPart clone+Weld n'avait rien donne). Reskin = recopier ces proprietes
+-- directement sur le MeshPart deja en place, aucun clone/weld necessaire.
+--------------------------------------------------------------------------------
+
+do
+	-- Workspace/PlayerGui en premier : c'est la que vivent les objets "live"
+	-- qui nous interessent (armes portees, UI ouverte). ReplicatedStorage peut
+	-- etre enorme (particules, sons, assets...) - le scanner en dernier.
+	local SCAN_ROOTS = { workspace, PlayerGui, game:GetService("StarterGui"), game:GetService("ReplicatedFirst"), ReplicatedStorage }
+	local SCAN_MAX_MATCHES = 10
+	local SCAN_MAX_DEPTH = 10
+	-- Budget SEPARE par conteneur (pas partage) : sinon un ReplicatedStorage
+	-- enorme epuise tout le budget avant meme d'atteindre Workspace, qui ne
+	-- serait alors jamais scanne (bug corrige : c'est ce qui s'est passe ici).
+	local SCAN_MAX_VISITED_PER_ROOT = 600000
+
+	-- Cherche (insensible a la casse) tout instance dont le nom contient
+	-- `query`, dans les conteneurs listes ci-dessus. S'arrete a
+	-- SCAN_MAX_MATCHES resultats et ne descend pas plus loin que
+	-- SCAN_MAX_DEPTH pour rester lisible/rapide.
+	local function findMatches(query)
+		local lowerQuery = query:lower()
+		local matches = {}
+		local stats = {}
+
+		for _, root in ipairs(SCAN_ROOTS) do
+			local visited = 0
+			local truncated = false
+
+			local function walk(inst, depth)
+				if #matches >= SCAN_MAX_MATCHES then return end
+				if visited >= SCAN_MAX_VISITED_PER_ROOT then
+					truncated = true
+					return
+				end
+				visited += 1
+				if inst.Name:lower():find(lowerQuery, 1, true) then
+					table.insert(matches, inst)
+				end
+				if depth >= SCAN_MAX_DEPTH then return end
+				for _, child in ipairs(inst:GetChildren()) do
+					if #matches >= SCAN_MAX_MATCHES then return end
+					if visited >= SCAN_MAX_VISITED_PER_ROOT then
+						truncated = true
+						return
+					end
+					walk(child, depth + 1)
+				end
+			end
+
+			walk(root, 0)
+			table.insert(stats, string.format("%s: %d visite(s)%s", root.Name, visited, truncated and " (limite atteinte)" or ""))
+			if #matches >= SCAN_MAX_MATCHES then break end
+		end
+
+		return matches, stats
+	end
+
+	local SkinSection = addSection(SkinPage, "Scanner (exploration)")
+	addLabelRow(SkinSection, "Cherche un nom (ex: Valentine, Shop, Skin...) dans ReplicatedStorage / PlayerGui / StarterGui / ReplicatedFirst / Workspace, et copie un dump des resultats dans le presse-papier. Colle-le moi pour qu'on trouve la vraie structure des items.")
+
+	local QueryBox = create("TextBox", {
+		Size = UDim2.new(1, 0, 0, 40),
+		BackgroundColor3 = Theme.Element,
+		Text = "Valentine",
+		PlaceholderText = "Nom a chercher...",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 15,
+		TextColor3 = Theme.Text,
+		PlaceholderColor3 = Theme.SubText,
+		ClearTextOnFocus = false,
+	}, SkinSection)
+	corner(QueryBox, 8)
+	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, QueryBox)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, QueryBox)
+
+	local ScanResultLabel = addLabelRow(SkinSection, "Aucune recherche effectuee pour l'instant.")
+
+	addButtonRow(SkinSection, "Chercher et copier le dump", function()
+		local query = QueryBox.Text
+		if query == "" then
+			notify("Tape un nom a chercher.")
+			return
+		end
+
+		local matches, stats = findMatches(query)
+		if #matches == 0 then
+			ScanResultLabel.Text = "Aucun resultat pour '" .. query .. "'. (" .. table.concat(stats, " | ") .. ")"
+			notify("Aucun resultat. Voir le detail sous la recherche (nb d'instances visitees par conteneur).")
+			return
+		end
+
+		local lines = {
+			"=== Recherche '" .. query .. "' ===",
+			os.date("%d/%m/%Y %H:%M:%S"),
+			#matches .. " resultat(s)" .. (#matches >= SCAN_MAX_MATCHES and " (limite atteinte, affine la recherche pour voir le reste)" or ""),
+			"Scan : " .. table.concat(stats, " | "),
+			"",
+		}
+		for _, inst in ipairs(matches) do
+			table.insert(lines, "--- " .. inst:GetFullName() .. "  [" .. inst.ClassName .. "] ---")
+			table.insert(lines, dumpTree(inst, SCAN_MAX_DEPTH))
+			table.insert(lines, "")
+		end
+
+		copyOrPrint(table.concat(lines, "\n"))
+		ScanResultLabel.Text = #matches .. " resultat(s) pour '" .. query .. "', dump copie."
+	end)
+
+	-- Ne garde que les resultats utilisables comme source de skin : soit un
+	-- MeshPart avec un mesh charge (armes recentes, ex. Golden Zabunagi),
+	-- soit un Part classique avec un SpecialMesh enfant qui lui donne sa
+	-- forme (ancienne methode, ex. Spider Gunbai - ClassName="Part", pas
+	-- "MeshPart", donc invisible pour le premier filtre si on s'arrete la).
+	local function findMeshMatches(query)
+		local matches, stats = findMatches(query)
+		local meshMatches = {}
+		for _, inst in ipairs(matches) do
+			if inst:IsA("MeshPart") and inst.MeshId ~= "" then
+				table.insert(meshMatches, inst)
+			elseif inst:IsA("BasePart") and inst:FindFirstChildWhichIsA("SpecialMesh") then
+				table.insert(meshMatches, inst)
+			end
+		end
+		return meshMatches, stats
+	end
+
+	-- Ton arme equipee = un MeshPart de ton perso qui a un Motor6D enfant
+	-- (c'est le joint qui l'accroche a la part "Main"). Generique : marche
+	-- pour n'importe quelle arme, pas seulement Golden Zabunagi.
+	local function findMyWeaponParts()
+		local character = LocalPlayer.Character
+		local found = {}
+		if not character then return found end
+		for _, desc in ipairs(character:GetDescendants()) do
+			if desc:IsA("MeshPart") and desc:FindFirstChildWhichIsA("Motor6D") then
+				table.insert(found, desc)
+			end
+		end
+		return found
+	end
+
+	local WeaponSkinSection = addSection(SkinPage, "Skin d'arme")
+	addLabelRow(WeaponSkinSection, "Ton arme equipee est un simple MeshPart accroche a ton perso par un Motor6D. On recopie juste MeshId/TextureID/Taille/Couleur d'une autre arme trouvee (rack du shop, arme d'un autre joueur...) directement dessus : 100% visuel, rien n'est envoye au serveur. Un respawn ou un changement d'arme remet l'original (a reappliquer).")
+
+	local myWeaponParts = {}
+	local myWeaponLabels = {}
+	local myWeaponSelector = nil
+	local MyWeaponHolder = create("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, WeaponSkinSection)
+	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, MyWeaponHolder)
+
+	local function refreshMyWeapon()
+		MyWeaponHolder:ClearAllChildren()
+		create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, MyWeaponHolder)
+
+		myWeaponParts = findMyWeaponParts()
+		if #myWeaponParts == 0 then
+			addLabelRow(MyWeaponHolder, "Aucune arme detectee sur ton perso (equipe-la en jeu, puis reessaie).")
+			myWeaponSelector = nil
+			return
+		end
+
+		myWeaponLabels = {}
+		for _, part in ipairs(myWeaponParts) do
+			table.insert(myWeaponLabels, part.Name)
+		end
+		myWeaponSelector = addDropdownRow(MyWeaponHolder, "Mon arme", myWeaponLabels, myWeaponLabels[1], nil)
+	end
+
+	addButtonRow(WeaponSkinSection, "Detecter mon arme", refreshMyWeapon)
+	refreshMyWeapon()
+
+	local skinScanResults = {}
+	local skinResultLabels = {}
+	local skinSelector = nil
+
+	local SkinQueryBox = create("TextBox", {
+		Size = UDim2.new(1, 0, 0, 40),
+		BackgroundColor3 = Theme.Element,
+		Text = "",
+		PlaceholderText = "Nom de l'arme/skin a copier (ex: Golden Zabunagi)...",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextColor3 = Theme.Text,
+		PlaceholderColor3 = Theme.SubText,
+		ClearTextOnFocus = false,
+	}, WeaponSkinSection)
+	corner(SkinQueryBox, 8)
+	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, SkinQueryBox)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, SkinQueryBox)
+
+	local SkinSearchResultLabel = addLabelRow(WeaponSkinSection, "Aucune recherche effectuee.")
+
+	local SkinResultHolder = create("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, WeaponSkinSection)
+	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, SkinResultHolder)
+
+	addButtonRow(WeaponSkinSection, "Chercher un skin source", function()
+		local query = SkinQueryBox.Text
+		if query == "" then
+			notify("Tape un nom a chercher.")
+			return
+		end
+		local matches, stats = findMeshMatches(query)
+		skinScanResults = matches
+		SkinSearchResultLabel.Text = #matches .. " MeshPart trouve(s) pour '" .. query .. "'. (" .. table.concat(stats, " | ") .. ")"
+
+		SkinResultHolder:ClearAllChildren()
+		create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, SkinResultHolder)
+
+		if #matches == 0 then
+			skinSelector = nil
+			addLabelRow(SkinResultHolder, "Aucun MeshPart trouve avec ce nom.")
+			return
+		end
+
+		skinResultLabels = {}
+		for _, inst in ipairs(matches) do
+			table.insert(skinResultLabels, inst:GetFullName())
+		end
+		skinSelector = addDropdownRow(SkinResultHolder, "Skin source", skinResultLabels, skinResultLabels[1], nil)
+	end)
+
+	addButtonRow(WeaponSkinSection, "Appliquer ce skin sur mon arme", function()
+		if not myWeaponSelector or #myWeaponParts == 0 then
+			notify("Detecte d'abord ton arme.")
+			return
+		end
+		if not skinSelector or #skinScanResults == 0 then
+			notify("Cherche d'abord un skin source.")
+			return
+		end
+
+		local myIndex = table.find(myWeaponLabels, myWeaponSelector.Get())
+		local myPart = myIndex and myWeaponParts[myIndex]
+		local sourceIndex = table.find(skinResultLabels, skinSelector.Get())
+		local sourcePart = sourceIndex and skinScanResults[sourceIndex]
+
+		if not (myPart and myPart.Parent) then
+			notify("Ton arme n'existe plus (respawn ?), redetecte-la.")
+			return
+		end
+		if not (sourcePart and sourcePart.Parent) then
+			notify("Le skin source n'existe plus, refais une recherche.")
+			return
+		end
+
+		-- On NE TOUCHE PLUS a myPart (Motor6D/hitbox/collision intacts) : trop
+		-- risque (a deja provoque un "tp sur l'arme" en cassant l'attache
+		-- reelle). A la place : originale rendue invisible, et un clone du
+		-- skin (juste le mesh, sans particules/attachments de la source)
+		-- colle par-dessus via WeldConstraint, qui la suit partout puisque
+		-- myPart continue d'etre anime normalement par son propre Motor6D.
+		local OVERLAY_NAME = "VonClientWeaponSkin"
+		local existingOverlay = myPart:FindFirstChild(OVERLAY_NAME)
+		if existingOverlay then existingOverlay:Destroy() end
+
+		local overlay = sourcePart:Clone()
+		for _, child in ipairs(overlay:GetChildren()) do
+			-- Garde SpecialMesh/Decal/Texture (donnent sa forme/son skin a un
+			-- Part classique, ex. Spider Gunbai) ; vire le reste (Weld,
+			-- Motor6D, Attachment, ParticleEmitter, Sound, Script...) qui
+			-- referencait le contexte de la source et n'a plus de sens isole.
+			if not (child:IsA("SpecialMesh") or child:IsA("Decal") or child:IsA("Texture")) then
+				child:Destroy()
+			end
+		end
+		overlay.Name = OVERLAY_NAME
+		overlay.Anchored = false
+		overlay.CanCollide = false
+		pcall(function() overlay.Massless = true end)
+		overlay.Transparency = 0
+		overlay.CFrame = myPart.CFrame
+		overlay.Parent = myPart
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = myPart
+		weld.Part1 = overlay
+		weld.Parent = overlay
+
+		myPart.Transparency = 1
+
+		notify("Skin colle par-dessus ton arme (originale juste rendue invisible, rien d'autre touche).")
+	end)
+
+	addButtonRow(WeaponSkinSection, "Retirer le skin colle", function()
+		if not myWeaponSelector or #myWeaponParts == 0 then
+			notify("Detecte d'abord ton arme.")
+			return
+		end
+		local myIndex = table.find(myWeaponLabels, myWeaponSelector.Get())
+		local myPart = myIndex and myWeaponParts[myIndex]
+		if not (myPart and myPart.Parent) then
+			notify("Ton arme n'existe plus (respawn ?), redetecte-la.")
+			return
+		end
+
+		local overlay = myPart:FindFirstChild("VonClientWeaponSkin")
+		if overlay then overlay:Destroy() end
+		myPart.Transparency = 0
+		notify("Skin retire, arme d'origine visible.")
+	end)
 end
 
 do
