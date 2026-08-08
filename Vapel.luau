@@ -2844,33 +2844,35 @@ end
 --------------------------------------------------------------------------------
 
 do
+	local Skin = {}
+
 	-- Workspace/PlayerGui en premier : c'est la que vivent les objets "live"
 	-- qui nous interessent (armes portees, UI ouverte). ReplicatedStorage peut
 	-- etre enorme (particules, sons, assets...) - le scanner en dernier.
-	local SCAN_ROOTS = { workspace, PlayerGui, game:GetService("StarterGui"), game:GetService("ReplicatedFirst"), ReplicatedStorage }
-	local SCAN_MAX_MATCHES = 10
-	local SCAN_MAX_DEPTH = 10
+	Skin.SCAN_ROOTS = { workspace, PlayerGui, game:GetService("StarterGui"), game:GetService("ReplicatedFirst"), ReplicatedStorage }
+	Skin.SCAN_MAX_MATCHES = 10
+	Skin.SCAN_MAX_DEPTH = 10
 	-- Budget SEPARE par conteneur (pas partage) : sinon un ReplicatedStorage
 	-- enorme epuise tout le budget avant meme d'atteindre Workspace, qui ne
 	-- serait alors jamais scanne (bug corrige : c'est ce qui s'est passe ici).
-	local SCAN_MAX_VISITED_PER_ROOT = 600000
+	Skin.SCAN_MAX_VISITED_PER_ROOT = 600000
 
 	-- Cherche (insensible a la casse) tout instance dont le nom contient
 	-- `query`, dans les conteneurs listes ci-dessus. S'arrete a
-	-- SCAN_MAX_MATCHES resultats et ne descend pas plus loin que
-	-- SCAN_MAX_DEPTH pour rester lisible/rapide.
-	local function findMatches(query)
+	-- Skin.SCAN_MAX_MATCHES resultats et ne descend pas plus loin que
+	-- Skin.SCAN_MAX_DEPTH pour rester lisible/rapide.
+	function Skin.findMatches(query)
 		local lowerQuery = query:lower()
 		local matches = {}
 		local stats = {}
 
-		for _, root in ipairs(SCAN_ROOTS) do
+		for _, root in ipairs(Skin.SCAN_ROOTS) do
 			local visited = 0
 			local truncated = false
 
 			local function walk(inst, depth)
-				if #matches >= SCAN_MAX_MATCHES then return end
-				if visited >= SCAN_MAX_VISITED_PER_ROOT then
+				if #matches >= Skin.SCAN_MAX_MATCHES then return end
+				if visited >= Skin.SCAN_MAX_VISITED_PER_ROOT then
 					truncated = true
 					return
 				end
@@ -2878,10 +2880,10 @@ do
 				if inst.Name:lower():find(lowerQuery, 1, true) then
 					table.insert(matches, inst)
 				end
-				if depth >= SCAN_MAX_DEPTH then return end
+				if depth >= Skin.SCAN_MAX_DEPTH then return end
 				for _, child in ipairs(inst:GetChildren()) do
-					if #matches >= SCAN_MAX_MATCHES then return end
-					if visited >= SCAN_MAX_VISITED_PER_ROOT then
+					if #matches >= Skin.SCAN_MAX_MATCHES then return end
+					if visited >= Skin.SCAN_MAX_VISITED_PER_ROOT then
 						truncated = true
 						return
 					end
@@ -2891,16 +2893,16 @@ do
 
 			walk(root, 0)
 			table.insert(stats, string.format("%s: %d visite(s)%s", root.Name, visited, truncated and " (limite atteinte)" or ""))
-			if #matches >= SCAN_MAX_MATCHES then break end
+			if #matches >= Skin.SCAN_MAX_MATCHES then break end
 		end
 
 		return matches, stats
 	end
 
-	local SkinSection = addSection(SkinPage, "Scanner (exploration)")
-	addLabelRow(SkinSection, "Cherche un nom (ex: Valentine, Shop, Skin...) dans ReplicatedStorage / PlayerGui / StarterGui / ReplicatedFirst / Workspace, et copie un dump des resultats dans le presse-papier. Colle-le moi pour qu'on trouve la vraie structure des items.")
+	Skin.SkinSection = addSection(SkinPage, "Scanner (exploration)")
+	addLabelRow(Skin.SkinSection, "Cherche un nom (ex: Valentine, Shop, Skin...) dans ReplicatedStorage / PlayerGui / StarterGui / ReplicatedFirst / Workspace, et copie un dump des resultats dans le presse-papier. Colle-le moi pour qu'on trouve la vraie structure des items.")
 
-	local QueryBox = create("TextBox", {
+	Skin.QueryBox = create("TextBox", {
 		Size = UDim2.new(1, 0, 0, 40),
 		BackgroundColor3 = Theme.Element,
 		Text = "Valentine",
@@ -2910,23 +2912,23 @@ do
 		TextColor3 = Theme.Text,
 		PlaceholderColor3 = Theme.SubText,
 		ClearTextOnFocus = false,
-	}, SkinSection)
-	corner(QueryBox, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, QueryBox)
-	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, QueryBox)
+	}, Skin.SkinSection)
+	corner(Skin.QueryBox, 8)
+	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, Skin.QueryBox)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, Skin.QueryBox)
 
-	local ScanResultLabel = addLabelRow(SkinSection, "Aucune recherche effectuee pour l'instant.")
+	Skin.ScanResultLabel = addLabelRow(Skin.SkinSection, "Aucune recherche effectuee pour l'instant.")
 
-	addButtonRow(SkinSection, "Chercher et copier le dump", function()
-		local query = QueryBox.Text
+	addButtonRow(Skin.SkinSection, "Chercher et copier le dump", function()
+		local query = Skin.QueryBox.Text
 		if query == "" then
 			notify("Tape un nom a chercher.")
 			return
 		end
 
-		local matches, stats = findMatches(query)
+		local matches, stats = Skin.findMatches(query)
 		if #matches == 0 then
-			ScanResultLabel.Text = "Aucun resultat pour '" .. query .. "'. (" .. table.concat(stats, " | ") .. ")"
+			Skin.ScanResultLabel.Text = "Aucun resultat pour '" .. query .. "'. (" .. table.concat(stats, " | ") .. ")"
 			notify("Aucun resultat. Voir le detail sous la recherche (nb d'instances visitees par conteneur).")
 			return
 		end
@@ -2934,18 +2936,18 @@ do
 		local lines = {
 			"=== Recherche '" .. query .. "' ===",
 			os.date("%d/%m/%Y %H:%M:%S"),
-			#matches .. " resultat(s)" .. (#matches >= SCAN_MAX_MATCHES and " (limite atteinte, affine la recherche pour voir le reste)" or ""),
+			#matches .. " resultat(s)" .. (#matches >= Skin.SCAN_MAX_MATCHES and " (limite atteinte, affine la recherche pour voir le reste)" or ""),
 			"Scan : " .. table.concat(stats, " | "),
 			"",
 		}
 		for _, inst in ipairs(matches) do
 			table.insert(lines, "--- " .. inst:GetFullName() .. "  [" .. inst.ClassName .. "] ---")
-			table.insert(lines, dumpTree(inst, SCAN_MAX_DEPTH))
+			table.insert(lines, dumpTree(inst, Skin.SCAN_MAX_DEPTH))
 			table.insert(lines, "")
 		end
 
 		copyOrPrint(table.concat(lines, "\n"))
-		ScanResultLabel.Text = #matches .. " resultat(s) pour '" .. query .. "', dump copie."
+		Skin.ScanResultLabel.Text = #matches .. " resultat(s) pour '" .. query .. "', dump copie."
 	end)
 
 	-- Ne garde que les resultats utilisables comme source de skin : soit un
@@ -2953,8 +2955,8 @@ do
 	-- soit un Part classique avec un SpecialMesh enfant qui lui donne sa
 	-- forme (ancienne methode, ex. Spider Gunbai - ClassName="Part", pas
 	-- "MeshPart", donc invisible pour le premier filtre si on s'arrete la).
-	local function findMeshMatches(query)
-		local matches, stats = findMatches(query)
+	function Skin.findMeshMatches(query)
+		local matches, stats = Skin.findMatches(query)
 		local meshMatches = {}
 		for _, inst in ipairs(matches) do
 			if inst:IsA("MeshPart") and inst.MeshId ~= "" then
@@ -2969,7 +2971,7 @@ do
 	-- Ton arme equipee = un MeshPart de ton perso qui a un Motor6D enfant
 	-- (c'est le joint qui l'accroche a la part "Main"). Generique : marche
 	-- pour n'importe quelle arme, pas seulement Golden Zabunagi.
-	local function findMyWeaponParts()
+	function Skin.findMyWeaponParts()
 		local character = LocalPlayer.Character
 		local found = {}
 		if not character then return found end
@@ -2981,41 +2983,41 @@ do
 		return found
 	end
 
-	local WeaponSkinSection = addSection(SkinPage, "Skin d'arme")
-	addLabelRow(WeaponSkinSection, "Ton arme equipee est un simple MeshPart accroche a ton perso par un Motor6D. On recopie juste MeshId/TextureID/Taille/Couleur d'une autre arme trouvee (rack du shop, arme d'un autre joueur...) directement dessus : 100% visuel, rien n'est envoye au serveur. Un respawn ou un changement d'arme remet l'original (a reappliquer).")
+	Skin.WeaponSkinSection = addSection(SkinPage, "Skin d'arme")
+	addLabelRow(Skin.WeaponSkinSection, "Ton arme equipee est un simple MeshPart accroche a ton perso par un Motor6D. On recopie juste MeshId/TextureID/Taille/Couleur d'une autre arme trouvee (rack du shop, arme d'un autre joueur...) directement dessus : 100% visuel, rien n'est envoye au serveur. Un respawn ou un changement d'arme remet l'original (a reappliquer).")
 
-	local myWeaponParts = {}
-	local myWeaponLabels = {}
-	local myWeaponSelector = nil
-	local MyWeaponHolder = create("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, WeaponSkinSection)
-	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, MyWeaponHolder)
+	Skin.myWeaponParts = {}
+	Skin.myWeaponLabels = {}
+	Skin.myWeaponSelector = nil
+	Skin.MyWeaponHolder = create("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, Skin.WeaponSkinSection)
+	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, Skin.MyWeaponHolder)
 
-	local function refreshMyWeapon()
-		MyWeaponHolder:ClearAllChildren()
-		create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, MyWeaponHolder)
+	function Skin.refreshMyWeapon()
+		Skin.MyWeaponHolder:ClearAllChildren()
+		create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, Skin.MyWeaponHolder)
 
-		myWeaponParts = findMyWeaponParts()
-		if #myWeaponParts == 0 then
-			addLabelRow(MyWeaponHolder, "Aucune arme detectee sur ton perso (equipe-la en jeu, puis reessaie).")
-			myWeaponSelector = nil
+		Skin.myWeaponParts = Skin.findMyWeaponParts()
+		if #Skin.myWeaponParts == 0 then
+			addLabelRow(Skin.MyWeaponHolder, "Aucune arme detectee sur ton perso (equipe-la en jeu, puis reessaie).")
+			Skin.myWeaponSelector = nil
 			return
 		end
 
-		myWeaponLabels = {}
-		for _, part in ipairs(myWeaponParts) do
-			table.insert(myWeaponLabels, part.Name)
+		Skin.myWeaponLabels = {}
+		for _, part in ipairs(Skin.myWeaponParts) do
+			table.insert(Skin.myWeaponLabels, part.Name)
 		end
-		myWeaponSelector = addDropdownRow(MyWeaponHolder, "Mon arme", myWeaponLabels, myWeaponLabels[1], nil)
+		Skin.myWeaponSelector = addDropdownRow(Skin.MyWeaponHolder, "Mon arme", Skin.myWeaponLabels, Skin.myWeaponLabels[1], nil)
 	end
 
-	addButtonRow(WeaponSkinSection, "Detecter mon arme", refreshMyWeapon)
-	refreshMyWeapon()
+	addButtonRow(Skin.WeaponSkinSection, "Detecter mon arme", Skin.refreshMyWeapon)
+	Skin.refreshMyWeapon()
 
-	local skinScanResults = {}
-	local skinResultLabels = {}
-	local skinSelector = nil
+	Skin.skinScanResults = {}
+	Skin.skinResultLabels = {}
+	Skin.skinSelector = nil
 
-	local SkinQueryBox = create("TextBox", {
+	Skin.SkinQueryBox = create("TextBox", {
 		Size = UDim2.new(1, 0, 0, 40),
 		BackgroundColor3 = Theme.Element,
 		Text = "",
@@ -3025,56 +3027,56 @@ do
 		TextColor3 = Theme.Text,
 		PlaceholderColor3 = Theme.SubText,
 		ClearTextOnFocus = false,
-	}, WeaponSkinSection)
-	corner(SkinQueryBox, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, SkinQueryBox)
-	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, SkinQueryBox)
+	}, Skin.WeaponSkinSection)
+	corner(Skin.SkinQueryBox, 8)
+	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, Skin.SkinQueryBox)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, Skin.SkinQueryBox)
 
-	local SkinSearchResultLabel = addLabelRow(WeaponSkinSection, "Aucune recherche effectuee.")
+	Skin.SkinSearchResultLabel = addLabelRow(Skin.WeaponSkinSection, "Aucune recherche effectuee.")
 
-	local SkinResultHolder = create("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, WeaponSkinSection)
-	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, SkinResultHolder)
+	Skin.SkinResultHolder = create("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, Skin.WeaponSkinSection)
+	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, Skin.SkinResultHolder)
 
-	addButtonRow(WeaponSkinSection, "Chercher un skin source", function()
-		local query = SkinQueryBox.Text
+	addButtonRow(Skin.WeaponSkinSection, "Chercher un skin source", function()
+		local query = Skin.SkinQueryBox.Text
 		if query == "" then
 			notify("Tape un nom a chercher.")
 			return
 		end
-		local matches, stats = findMeshMatches(query)
-		skinScanResults = matches
-		SkinSearchResultLabel.Text = #matches .. " MeshPart trouve(s) pour '" .. query .. "'. (" .. table.concat(stats, " | ") .. ")"
+		local matches, stats = Skin.findMeshMatches(query)
+		Skin.skinScanResults = matches
+		Skin.SkinSearchResultLabel.Text = #matches .. " MeshPart trouve(s) pour '" .. query .. "'. (" .. table.concat(stats, " | ") .. ")"
 
-		SkinResultHolder:ClearAllChildren()
-		create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, SkinResultHolder)
+		Skin.SkinResultHolder:ClearAllChildren()
+		create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, Skin.SkinResultHolder)
 
 		if #matches == 0 then
-			skinSelector = nil
-			addLabelRow(SkinResultHolder, "Aucun MeshPart trouve avec ce nom.")
+			Skin.skinSelector = nil
+			addLabelRow(Skin.SkinResultHolder, "Aucun MeshPart trouve avec ce nom.")
 			return
 		end
 
-		skinResultLabels = {}
+		Skin.skinResultLabels = {}
 		for _, inst in ipairs(matches) do
-			table.insert(skinResultLabels, inst:GetFullName())
+			table.insert(Skin.skinResultLabels, inst:GetFullName())
 		end
-		skinSelector = addDropdownRow(SkinResultHolder, "Skin source", skinResultLabels, skinResultLabels[1], nil)
+		Skin.skinSelector = addDropdownRow(Skin.SkinResultHolder, "Skin source", Skin.skinResultLabels, Skin.skinResultLabels[1], nil)
 	end)
 
-	addButtonRow(WeaponSkinSection, "Appliquer ce skin sur mon arme", function()
-		if not myWeaponSelector or #myWeaponParts == 0 then
+	addButtonRow(Skin.WeaponSkinSection, "Appliquer ce skin sur mon arme", function()
+		if not Skin.myWeaponSelector or #Skin.myWeaponParts == 0 then
 			notify("Detecte d'abord ton arme.")
 			return
 		end
-		if not skinSelector or #skinScanResults == 0 then
+		if not Skin.skinSelector or #Skin.skinScanResults == 0 then
 			notify("Cherche d'abord un skin source.")
 			return
 		end
 
-		local myIndex = table.find(myWeaponLabels, myWeaponSelector.Get())
-		local myPart = myIndex and myWeaponParts[myIndex]
-		local sourceIndex = table.find(skinResultLabels, skinSelector.Get())
-		local sourcePart = sourceIndex and skinScanResults[sourceIndex]
+		local myIndex = table.find(Skin.myWeaponLabels, Skin.myWeaponSelector.Get())
+		local myPart = myIndex and Skin.myWeaponParts[myIndex]
+		local sourceIndex = table.find(Skin.skinResultLabels, Skin.skinSelector.Get())
+		local sourcePart = sourceIndex and Skin.skinScanResults[sourceIndex]
 
 		if not (myPart and myPart.Parent) then
 			notify("Ton arme n'existe plus (respawn ?), redetecte-la.")
@@ -3123,13 +3125,13 @@ do
 		notify("Skin colle par-dessus ton arme (originale juste rendue invisible, rien d'autre touche).")
 	end)
 
-	addButtonRow(WeaponSkinSection, "Retirer le skin colle", function()
-		if not myWeaponSelector or #myWeaponParts == 0 then
+	addButtonRow(Skin.WeaponSkinSection, "Retirer le skin colle", function()
+		if not Skin.myWeaponSelector or #Skin.myWeaponParts == 0 then
 			notify("Detecte d'abord ton arme.")
 			return
 		end
-		local myIndex = table.find(myWeaponLabels, myWeaponSelector.Get())
-		local myPart = myIndex and myWeaponParts[myIndex]
+		local myIndex = table.find(Skin.myWeaponLabels, Skin.myWeaponSelector.Get())
+		local myPart = myIndex and Skin.myWeaponParts[myIndex]
 		if not (myPart and myPart.Parent) then
 			notify("Ton arme n'existe plus (respawn ?), redetecte-la.")
 			return
