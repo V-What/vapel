@@ -2602,6 +2602,7 @@ local VisualsPage = createCategory("Visuels", Theme.Accent)
 local PlayerPage = createCategory("Joueur", Color3.fromRGB(196, 120, 255))
 local AutoPage = createCategory("Auto", Color3.fromRGB(255, 175, 70))
 local SkinPage = createCategory("Skin", Color3.fromRGB(255, 120, 170))
+local AutresPage = createCategory("Autres", Color3.fromRGB(110, 210, 200))
 local SettingsPage = createCategory("Settings", Theme.Success)
 
 --------------------------------------------------------------------------------
@@ -2938,6 +2939,70 @@ do
 		end)
 		addButtonRow(SellAllSection, "Vendre Tout", function()
 			sellAllOfType(Settings.SelectedSellType)
+		end)
+	end
+
+	do
+		-- Spectate Leaderboard : reutilise DataFunction:InvokeServer("GetPlayerList")
+		-- (le vrai classement du jeu, groupe par village/rang - PlayerList dans le
+		-- dump client, data.lua ~L1217) et DataEvent:FireServer("observe", ID)
+		-- (capture reseau fournie, data3.lua) pour mettre la camera sur le joueur
+		-- choisi. D'apres le dump (data.lua ~L1314), le jeu n'autorise le clic
+		-- "Observer" que si le Skill actif est "Chakra Sense" (ou si moderateur) -
+		-- le serveur valide peut-etre la meme condition, donc la demande peut etre
+		-- ignoree si aucun des deux n'est vrai. Le retour cameraSubject est gere
+		-- par le LocalScript du jeu lui-meme (toujours actif a cote de ce script,
+		-- data.lua ~L10185 : DataEvent.OnClientEvent("Observe", <Player>)), donc
+		-- rien a faire cote client pour appliquer le changement de camera.
+		local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
+
+		local spectateTargetsByName = {}
+
+		local function getSpectateOptions()
+			spectateTargetsByName = {}
+			local names = {}
+
+			local ok, list = pcall(function()
+				return ReplicatedStorage.Events.DataFunction:InvokeServer("GetPlayerList")
+			end)
+			if ok and list then
+				for _, entry in ipairs(list) do
+					local displayName = entry.GameName or entry.RealName
+					if displayName and entry.ID and not spectateTargetsByName[displayName] then
+						spectateTargetsByName[displayName] = entry.ID
+						table.insert(names, displayName)
+					end
+				end
+			end
+
+			table.sort(names)
+			return names
+		end
+
+		local function spectatePlayer(name)
+			local id = spectateTargetsByName[name]
+			if not id then
+				notify("Cible introuvable, actualise la liste.", "error")
+				return
+			end
+			if not DataEvent then
+				notify("ReplicatedStorage.Events.DataEvent introuvable.", "error")
+				return
+			end
+			DataEvent:FireServer("observe", id)
+			notify("Demande de spectate envoyee pour : " .. name .. ".")
+		end
+
+		local SpectateSection = addSection(AutresPage, "Spectate Leaderboard")
+		addLabelRow(SpectateSection, "Choisis un joueur dans le classement du jeu et passe ta camera sur lui. Necessite le Skill \"Chakra Sense\" actif (ou d'etre moderateur) d'apres le jeu - sinon la demande est probablement ignoree par le serveur.")
+		local spectateSelector = addTeleportSelector(SpectateSection, "Joueur", "Spectate", getSpectateOptions, spectatePlayer)
+		addButtonRow(SpectateSection, "Actualiser la liste", spectateSelector.Refresh)
+		addButtonRow(SpectateSection, "Arreter le Spectate", function()
+			local character = LocalPlayer.Character
+			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+			if humanoid then
+				workspace.CurrentCamera.CameraSubject = humanoid
+			end
 		end)
 	end
 
