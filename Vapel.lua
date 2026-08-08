@@ -1,3 +1,27 @@
+--------------------------------------------------------------------------------
+-- Limite Luau : 200 registres locaux.
+-- Ce fichier entier est compile comme UNE SEULE fonction (le chunk racine),
+-- et Luau limite une fonction a 200 registres locaux actifs simultanement.
+-- Un local ne libere son registre que quand le bloc lexical (do...end, if,
+-- for, function...) qui le contient se termine - donc des dizaines de
+-- variables locales "a plat" (jamais imbriquees dans un do...end qui se
+-- referme) s'accumulent et finissent par depasser la limite, meme si chacune
+-- semble anodine individuellement. Erreur typique a la compilation :
+--   Out of local registers when trying to allocate <Nom> : exceeded limit 200
+-- Regle a suivre en ajoutant du code ici (variables/UI/sections...) :
+--   - Isoler chaque section/feature independante dans son propre do...end
+--     des qu'elle a ses propres variables locales (ex: `local XSection = ...`)
+--     qui ne sont pas reutilisees ailleurs : ca libere leurs registres des la
+--     fin du bloc au lieu de les garder ouverts jusqu'a la fin du fichier.
+--   - Preferer ecrire directement dans une table partagee (voir
+--     FEATURE_CONTROLS plus bas) plutot que de creer une variable locale par
+--     controle UI.
+--   - Si l'erreur revient malgre ce wrapping, c'est que le total cumule sur
+--     tout le fichier est deja proche de la limite : chercher d'autres blocs
+--     "a plat" (grep "^local " et "^\tlocal ") a regrouper dans des do...end,
+--     pas seulement le code qu'on vient d'ajouter.
+--------------------------------------------------------------------------------
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -2508,232 +2532,263 @@ local applyFeatureSettings
 do
 	local FEATURE_CONTROLS = {}
 
-	-- Reglages ESP : active/désactive, mode (Lua ou Python), distance max, affichage PV et distance.
-	local EspSection = addSection(VisualsPage, "ESP")
+	-- Chaque section vit dans son propre do...end : la variable "XSection"
+	-- (et le reste de ses locals) ne sert que le temps de construire cette
+	-- section, donc on la laisse sortir de portee tout de suite pour liberer
+	-- son registre local plutot que de le garder ouvert jusqu'a la fin du
+	-- bloc. Voir la note "Limite Luau : 200 registres locaux" en tete de
+	-- fichier avant d'ajouter une nouvelle section ici sans ce wrapping.
 
-	FEATURE_CONTROLS.EspEnabled = addToggleRow(EspSection, "ESP Actif", enabled, function(state)
-		setEnabled(state)
-		if not state then pushOverlayDisabled() end
-		Settings.EspEnabled = state
-	end)
+	do
+		-- Reglages ESP : active/désactive, mode (Lua ou Python), distance max, affichage PV et distance.
+		local EspSection = addSection(VisualsPage, "ESP")
 
-	FEATURE_CONTROLS.EspMode = addDropdownRow(EspSection, "Mode ESP", { "Lua", "Python" }, EspMode, function(mode)
-		local wasPython = enabled and EspMode == "Python"
-		EspMode = mode
-		setEnabled(enabled) -- reapplique la visibilite des billboards selon le nouveau mode
-		if wasPython and mode ~= "Python" then pushOverlayDisabled() end
-		Settings.EspMode = mode
-	end)
+		FEATURE_CONTROLS.EspEnabled = addToggleRow(EspSection, "ESP Actif", enabled, function(state)
+			setEnabled(state)
+			if not state then pushOverlayDisabled() end
+			Settings.EspEnabled = state
+		end)
 
-	FEATURE_CONTROLS.EspMaxDistance = addSliderRow(EspSection, "Distance Max", 0, 10000, EspMaxDistance, 1, function(v)
-		EspMaxDistance = v
-		Settings.EspMaxDistance = v
-	end)
+		FEATURE_CONTROLS.EspMode = addDropdownRow(EspSection, "Mode ESP", { "Lua", "Python" }, EspMode, function(mode)
+			local wasPython = enabled and EspMode == "Python"
+			EspMode = mode
+			setEnabled(enabled) -- reapplique la visibilite des billboards selon le nouveau mode
+			if wasPython and mode ~= "Python" then pushOverlayDisabled() end
+			Settings.EspMode = mode
+		end)
 
-	FEATURE_CONTROLS.ShowHealth = addToggleRow(EspSection, "Afficher PV", ShowHealth, function(state)
-		ShowHealth = state
-		refreshAllPlayerLabels()
-		Settings.ShowHealth = state
-	end)
+		FEATURE_CONTROLS.EspMaxDistance = addSliderRow(EspSection, "Distance Max", 0, 10000, EspMaxDistance, 1, function(v)
+			EspMaxDistance = v
+			Settings.EspMaxDistance = v
+		end)
 
-	FEATURE_CONTROLS.ShowDistance = addToggleRow(EspSection, "Afficher Distance", ShowDistance, function(state)
-		ShowDistance = state
-		refreshAllPlayerLabels()
-		Settings.ShowDistance = state
-	end)
+		FEATURE_CONTROLS.ShowHealth = addToggleRow(EspSection, "Afficher PV", ShowHealth, function(state)
+			ShowHealth = state
+			refreshAllPlayerLabels()
+			Settings.ShowHealth = state
+		end)
 
-	FEATURE_CONTROLS.ShowChakra = addToggleRow(EspSection, "Afficher Chakra", ShowChakra, function(state)
-		ShowChakra = state
-		refreshAllPlayerLabels()
-		Settings.ShowChakra = state
-	end)
+		FEATURE_CONTROLS.ShowDistance = addToggleRow(EspSection, "Afficher Distance", ShowDistance, function(state)
+			ShowDistance = state
+			refreshAllPlayerLabels()
+			Settings.ShowDistance = state
+		end)
 
-	FEATURE_CONTROLS.ShowBlood = addToggleRow(EspSection, "Afficher Blood", ShowBlood, function(state)
-		ShowBlood = state
-		refreshAllPlayerLabels()
-		Settings.ShowBlood = state
-	end)
+		FEATURE_CONTROLS.ShowChakra = addToggleRow(EspSection, "Afficher Chakra", ShowChakra, function(state)
+			ShowChakra = state
+			refreshAllPlayerLabels()
+			Settings.ShowChakra = state
+		end)
 
-	local EnvSection = addSection(VisualsPage, "Environnement")
+		FEATURE_CONTROLS.ShowBlood = addToggleRow(EspSection, "Afficher Blood", ShowBlood, function(state)
+			ShowBlood = state
+			refreshAllPlayerLabels()
+			Settings.ShowBlood = state
+		end)
+	end
 
-	FEATURE_CONTROLS.NoFogEnabled = addToggleRow(EnvSection, "No Fog", NoFogEnabled, function(state)
-		setNoFog(state)
-		Settings.NoFogEnabled = state
-	end)
-	FEATURE_CONTROLS.NoRainEnabled = addToggleRow(EnvSection, "No Rain", NoRainEnabled, function(state)
-		setNoRain(state)
-		Settings.NoRainEnabled = state
-	end)
-	FEATURE_CONTROLS.FullBrightEnabled = addToggleRow(EnvSection, "Full Bright", FullBrightEnabled, function(state)
-		setFullBright(state)
-		Settings.FullBrightEnabled = state
-	end)
+	do
+		local EnvSection = addSection(VisualsPage, "Environnement")
 
-	FEATURE_CONTROLS.BrightnessLevel = addSliderRow(EnvSection, "Brightness Level", 1, 10, BrightnessLevel, 0.1, function(v)
-		BrightnessLevel = v
-		Settings.BrightnessLevel = v
-	end)
+		FEATURE_CONTROLS.NoFogEnabled = addToggleRow(EnvSection, "No Fog", NoFogEnabled, function(state)
+			setNoFog(state)
+			Settings.NoFogEnabled = state
+		end)
+		FEATURE_CONTROLS.NoRainEnabled = addToggleRow(EnvSection, "No Rain", NoRainEnabled, function(state)
+			setNoRain(state)
+			Settings.NoRainEnabled = state
+		end)
+		FEATURE_CONTROLS.FullBrightEnabled = addToggleRow(EnvSection, "Full Bright", FullBrightEnabled, function(state)
+			setFullBright(state)
+			Settings.FullBrightEnabled = state
+		end)
 
-	FEATURE_CONTROLS.TimeOfDay = addDropdownRow(EnvSection, "Heure", { "Morning", "Afternoon", "Evening", "Night" }, TimeOfDay, function(v)
-		TimeOfDay = v
-		Settings.TimeOfDay = v
-	end)
+		FEATURE_CONTROLS.BrightnessLevel = addSliderRow(EnvSection, "Brightness Level", 1, 10, BrightnessLevel, 0.1, function(v)
+			BrightnessLevel = v
+			Settings.BrightnessLevel = v
+		end)
 
-	FEATURE_CONTROLS.TimeChangerEnabled = addToggleRow(EnvSection, "Time Changer", TimeChangerEnabled, function(state)
-		setTimeChanger(state)
-		Settings.TimeChangerEnabled = state
-	end)
+		FEATURE_CONTROLS.TimeOfDay = addDropdownRow(EnvSection, "Heure", { "Morning", "Afternoon", "Evening", "Night" }, TimeOfDay, function(v)
+			TimeOfDay = v
+			Settings.TimeOfDay = v
+		end)
+
+		FEATURE_CONTROLS.TimeChangerEnabled = addToggleRow(EnvSection, "Time Changer", TimeChangerEnabled, function(state)
+			setTimeChanger(state)
+			Settings.TimeChangerEnabled = state
+		end)
+	end
 
 	--------------------------------------------------------------------------------
 	------------------------------- PLAYER -----------------------------------------
 	--------------------------------------------------------------------------------
 
-	local NotifSection = addSection(PlayerPage, "Notifications")
+	do
+		local NotifSection = addSection(PlayerPage, "Notifications")
 
-	FEATURE_CONTROLS.ChakraSenseNotifier = addToggleRow(NotifSection, "Chakra Sense Notifier", ChakraSenseNotifier, function(state)
-		ChakraSenseNotifier = state
-		Settings.ChakraSenseNotifier = state
-	end)
+		FEATURE_CONTROLS.ChakraSenseNotifier = addToggleRow(NotifSection, "Chakra Sense Notifier", ChakraSenseNotifier, function(state)
+			ChakraSenseNotifier = state
+			Settings.ChakraSenseNotifier = state
+		end)
+	end
 
-	local MovementSection = addSection(PlayerPage, "Mouvement")
+	do
+		local MovementSection = addSection(PlayerPage, "Mouvement")
 
-	FEATURE_CONTROLS.NoclipEnabled = addToggleRow(MovementSection, "Noclip", NoclipEnabled, function(state)
-		setNoclip(state)
-		Settings.NoclipEnabled = state
-	end)
+		FEATURE_CONTROLS.NoclipEnabled = addToggleRow(MovementSection, "Noclip", NoclipEnabled, function(state)
+			setNoclip(state)
+			Settings.NoclipEnabled = state
+		end)
 
-	FEATURE_CONTROLS.FlyEnabled = addToggleRow(MovementSection, "Fly", FlyEnabled, function(state)
-		setFly(state)
-		Settings.FlyEnabled = state
-	end)
+		FEATURE_CONTROLS.FlyEnabled = addToggleRow(MovementSection, "Fly", FlyEnabled, function(state)
+			setFly(state)
+			Settings.FlyEnabled = state
+		end)
 
-	FEATURE_CONTROLS.FlySpeed = addSliderRow(MovementSection, "Fly Speed", 10, 500, FlySpeed, 10, function(v)
-		FlySpeed = v
-		Settings.FlySpeed = v
-	end)
+		FEATURE_CONTROLS.FlySpeed = addSliderRow(MovementSection, "Fly Speed", 10, 500, FlySpeed, 10, function(v)
+			FlySpeed = v
+			Settings.FlySpeed = v
+		end)
 
-	addLabelRow(MovementSection, "Fly : ZQSD/WASD pour se deplacer, Espace pour monter, Ctrl pour descendre.")
+		addLabelRow(MovementSection, "Fly : ZQSD/WASD pour se deplacer, Espace pour monter, Ctrl pour descendre.")
+	end
 
-	local TeleportPlayerSection = addSection(PlayerPage, "Teleport Joueur")
-	local playerTeleportSelector = addTeleportSelector(TeleportPlayerSection, "Joueur", "Teleporter au joueur",
-		function()
-			local names = {}
-			for _, player in ipairs(Players:GetPlayers()) do
-				if player ~= LocalPlayer then
-					table.insert(names, player.Name)
+	do
+		local TeleportPlayerSection = addSection(PlayerPage, "Teleport Joueur")
+		local playerTeleportSelector = addTeleportSelector(TeleportPlayerSection, "Joueur", "Teleporter au joueur",
+			function()
+				local names = {}
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player ~= LocalPlayer then
+						table.insert(names, player.Name)
+					end
 				end
+				table.sort(names)
+				return names
+			end,
+			function(name)
+				local target = Players:FindFirstChild(name)
+				if not target then
+					notify("Joueur introuvable.")
+					return
+				end
+				teleportToPlayer(target)
 			end
-			table.sort(names)
-			return names
-		end,
-		function(name)
-			local target = Players:FindFirstChild(name)
-			if not target then
-				notify("Joueur introuvable.")
+		)
+		track(Players.PlayerAdded:Connect(playerTeleportSelector.Refresh))
+		track(Players.PlayerRemoving:Connect(function()
+			task.wait() -- laisse le joueur sortir de Players:GetPlayers() avant de rafraichir
+			playerTeleportSelector.Refresh()
+		end))
+	end
+
+	do
+		local TeleportNpcSection = addSection(PlayerPage, "Teleport PNJ")
+		local npcTeleportSelector = addTeleportSelector(TeleportNpcSection, "PNJ", "Teleporter au PNJ",
+			function()
+				local names = {}
+				for name in pairs(NpcsByName) do
+					table.insert(names, name)
+				end
+				table.sort(names)
+				return names
+			end,
+			teleportToNpc
+		)
+		onNpcListChanged = npcTeleportSelector.Refresh
+	end
+
+	do
+		local SafeSpotSection = addSection(PlayerPage, "Safe Spot")
+		addButtonRow(SafeSpotSection, "Definir Safe Spot", setSafeSpot)
+		addButtonRow(SafeSpotSection, "Teleporter au Safe Spot", teleportToSafeSpot)
+	end
+
+	do
+		local ChakraPointsSection = addSection(PlayerPage, "Chakra Points")
+		if #ChakraPointNames > 0 then
+			FEATURE_CONTROLS.SelectedChakraPoint = addDropdownRow(ChakraPointsSection, "Chakra Point", ChakraPointNames, SelectedChakraPoint, function(v)
+				SelectedChakraPoint = v
+				Settings.SelectedChakraPoint = v
+			end)
+			addButtonRow(ChakraPointsSection, "Teleporter", teleportToChakraPoint)
+		else
+			addLabelRow(ChakraPointsSection, "Aucun ChakraPoints trouve dans workspace.")
+		end
+	end
+
+	do
+		local InventorySection = addSection(PlayerPage, "Inventaire")
+		addLabelRow(InventorySection, "Envoie Inventaire (Loadout) + Hotbar + Lifeforce au webhook Discord. Auto toutes les 5 min. Astuce : ouvre ton inventaire en jeu une fois pour que les slots se remplissent.")
+		addButtonRow(InventorySection, "Envoyer au webhook Discord", sendInventoryToWebhook)
+	end
+
+	do
+		local AfkAgeUpSection = addSection(AutoPage, "AFK AgeUp")
+		addLabelRow(AfkAgeUpSection, "Teleporte automatiquement vers une Safe Place des qu'un joueur passe a moins de 300 metres (cooldown 1s entre deux teleportations).")
+		FEATURE_CONTROLS.AfkAgeUpEnabled = addToggleRow(AfkAgeUpSection, "AFK AgeUp", Settings.AfkAgeUpEnabled, function(state)
+			setAfkAgeUp(state)
+			Settings.AfkAgeUpEnabled = state
+		end)
+	end
+
+	do
+		local PanicTeleportSection = addSection(AutoPage, "Panic Teleport")
+		addLabelRow(PanicTeleportSection, "Des que tes PV passent sous 50, teleportation toutes les 0.1s entre les Safe Places. S'arrete quand tes PV repassent au-dessus de 100.")
+		FEATURE_CONTROLS.PanicTeleportEnabled = addToggleRow(PanicTeleportSection, "Panic Teleport", Settings.PanicTeleportEnabled, function(state)
+			setPanicTeleport(state)
+			Settings.PanicTeleportEnabled = state
+		end)
+	end
+
+	do
+		-- Vendre Tout : appelle le RemoteFunction ReplicatedStorage.Events.DataFunction
+		-- avec l'action "SellingBulk", d'apres un appel capture manuellement en jeu :
+		--   Event:InvokeServer("SellingBulk", 3, "Trinket", nil, <HumanoidRootPart>)
+		-- Deux parametres restent incertains (non confirmes en jeu) :
+		--   - le "3" : etait le prix affiche lors de la vente testee, pas forcement
+		--     une quantite ni une valeur libre. On le reutilise tel quel, faute de
+		--     savoir si le serveur le valide.
+		--   - le HumanoidRootPart : on suppose que c'est celui du joueur local (a
+		--     verifier en jeu ; si la vente echoue, il faudra p-e passer celui d'un
+		--     PNJ marchand a proximite a la place).
+		-- Liste volontairement courte : ajouter une entree ici suffit pour l'ajouter
+		-- au menu deroulant "Vendre Tout".
+		local SELLABLE_ITEM_TYPES = { "Trinket" }
+
+		local function sellAllOfType(itemType)
+			local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if not rootPart then
+				notify("Personnage introuvable, impossible de vendre.")
 				return
 			end
-			teleportToPlayer(target)
-		end
-	)
-	track(Players.PlayerAdded:Connect(playerTeleportSelector.Refresh))
-	track(Players.PlayerRemoving:Connect(function()
-		task.wait() -- laisse le joueur sortir de Players:GetPlayers() avant de rafraichir
-		playerTeleportSelector.Refresh()
-	end))
 
-	local TeleportNpcSection = addSection(PlayerPage, "Teleport PNJ")
-	local npcTeleportSelector = addTeleportSelector(TeleportNpcSection, "PNJ", "Teleporter au PNJ",
-		function()
-			local names = {}
-			for name in pairs(NpcsByName) do
-				table.insert(names, name)
+			local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
+			if not DataFunction then
+				notify("ReplicatedStorage.Events.DataFunction introuvable.")
+				return
 			end
-			table.sort(names)
-			return names
-		end,
-		teleportToNpc
-	)
-	onNpcListChanged = npcTeleportSelector.Refresh
 
-	local SafeSpotSection = addSection(PlayerPage, "Safe Spot")
-	addButtonRow(SafeSpotSection, "Definir Safe Spot", setSafeSpot)
-	addButtonRow(SafeSpotSection, "Teleporter au Safe Spot", teleportToSafeSpot)
+			local ok, err = pcall(function()
+				DataFunction:InvokeServer("SellingBulk", 3, itemType, nil, rootPart)
+			end)
 
-	local ChakraPointsSection = addSection(PlayerPage, "Chakra Points")
-	if #ChakraPointNames > 0 then
-		FEATURE_CONTROLS.SelectedChakraPoint = addDropdownRow(ChakraPointsSection, "Chakra Point", ChakraPointNames, SelectedChakraPoint, function(v)
-			SelectedChakraPoint = v
-			Settings.SelectedChakraPoint = v
+			if ok then
+				notify("Vente envoyee pour : " .. itemType .. ".")
+			else
+				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(err))
+			end
+		end
+
+		local SellAllSection = addSection(AutoPage, "Vendre Tout")
+		addLabelRow(SellAllSection, "Beta : vend d'un coup tout ce que tu possedes du type choisi. Le prix envoie au serveur n'est pas confirme fiable, teste en jeu avant de compter dessus.")
+		FEATURE_CONTROLS.SelectedSellType = addDropdownRow(SellAllSection, "Type d'objet", SELLABLE_ITEM_TYPES, Settings.SelectedSellType, function(v)
+			Settings.SelectedSellType = v
 		end)
-		addButtonRow(ChakraPointsSection, "Teleporter", teleportToChakraPoint)
-	else
-		addLabelRow(ChakraPointsSection, "Aucun ChakraPoints trouve dans workspace.")
-	end
-
-	local InventorySection = addSection(PlayerPage, "Inventaire")
-	addLabelRow(InventorySection, "Envoie Inventaire (Loadout) + Hotbar + Lifeforce au webhook Discord. Auto toutes les 5 min. Astuce : ouvre ton inventaire en jeu une fois pour que les slots se remplissent.")
-	addButtonRow(InventorySection, "Envoyer au webhook Discord", sendInventoryToWebhook)
-
-	local AfkAgeUpSection = addSection(AutoPage, "AFK AgeUp")
-	addLabelRow(AfkAgeUpSection, "Teleporte automatiquement vers une Safe Place des qu'un joueur passe a moins de 300 metres (cooldown 1s entre deux teleportations).")
-	FEATURE_CONTROLS.AfkAgeUpEnabled = addToggleRow(AfkAgeUpSection, "AFK AgeUp", Settings.AfkAgeUpEnabled, function(state)
-		setAfkAgeUp(state)
-		Settings.AfkAgeUpEnabled = state
-	end)
-
-	local PanicTeleportSection = addSection(AutoPage, "Panic Teleport")
-	addLabelRow(PanicTeleportSection, "Des que tes PV passent sous 50, teleportation toutes les 0.1s entre les Safe Places. S'arrete quand tes PV repassent au-dessus de 100.")
-	FEATURE_CONTROLS.PanicTeleportEnabled = addToggleRow(PanicTeleportSection, "Panic Teleport", Settings.PanicTeleportEnabled, function(state)
-		setPanicTeleport(state)
-		Settings.PanicTeleportEnabled = state
-	end)
-
-	-- Vendre Tout : appelle le RemoteFunction ReplicatedStorage.Events.DataFunction
-	-- avec l'action "SellingBulk", d'apres un appel capture manuellement en jeu :
-	--   Event:InvokeServer("SellingBulk", 3, "Trinket", nil, <HumanoidRootPart>)
-	-- Deux parametres restent incertains (non confirmes en jeu) :
-	--   - le "3" : etait le prix affiche lors de la vente testee, pas forcement
-	--     une quantite ni une valeur libre. On le reutilise tel quel, faute de
-	--     savoir si le serveur le valide.
-	--   - le HumanoidRootPart : on suppose que c'est celui du joueur local (a
-	--     verifier en jeu ; si la vente echoue, il faudra p-e passer celui d'un
-	--     PNJ marchand a proximite a la place).
-	-- Liste volontairement courte : ajouter une entree ici suffit pour l'ajouter
-	-- au menu deroulant "Vendre Tout".
-	local SELLABLE_ITEM_TYPES = { "Trinket" }
-
-	local function sellAllOfType(itemType)
-		local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if not rootPart then
-			notify("Personnage introuvable, impossible de vendre.")
-			return
-		end
-
-		local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
-		if not DataFunction then
-			notify("ReplicatedStorage.Events.DataFunction introuvable.")
-			return
-		end
-
-		local ok, err = pcall(function()
-			DataFunction:InvokeServer("SellingBulk", 3, itemType, nil, rootPart)
+		addButtonRow(SellAllSection, "Vendre Tout", function()
+			sellAllOfType(Settings.SelectedSellType)
 		end)
-
-		if ok then
-			notify("Vente envoyee pour : " .. itemType .. ".")
-		else
-			notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(err))
-		end
 	end
-
-	local SellAllSection = addSection(AutoPage, "Vendre Tout")
-	addLabelRow(SellAllSection, "Beta : vend d'un coup tout ce que tu possedes du type choisi. Le prix envoie au serveur n'est pas confirme fiable, teste en jeu avant de compter dessus.")
-	FEATURE_CONTROLS.SelectedSellType = addDropdownRow(SellAllSection, "Type d'objet", SELLABLE_ITEM_TYPES, Settings.SelectedSellType, function(v)
-		Settings.SelectedSellType = v
-	end)
-	addButtonRow(SellAllSection, "Vendre Tout", function()
-		sellAllOfType(Settings.SelectedSellType)
-	end)
 
 	-- Pousse une config chargee vers l'UI (declenche l'onChange normal de
 	-- chaque controle, qui applique l'effet reel) sans dupliquer la logique.
