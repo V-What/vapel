@@ -2957,190 +2957,106 @@ do
 	end
 
 	do
-		-- Spectate Leaderboard : reutilise DataFunction:InvokeServer("GetPlayerList")
-		-- (le vrai classement du jeu, groupe par village/rang - PlayerList dans le
-		-- dump client, data.lua ~L1217) et DataEvent:FireServer("observe", ID)
-		-- (capture reseau fournie, data3.lua) pour mettre la camera sur le joueur
-		-- choisi. D'apres le dump (data.lua ~L1314), le jeu n'autorise le clic
-		-- "Observer" que si le Skill actif est "Chakra Sense" (ou si moderateur) -
-		-- le serveur valide peut-etre la meme condition, donc la demande peut etre
-		-- ignoree si aucun des deux n'est vrai. Le retour cameraSubject est gere
-		-- par le LocalScript du jeu lui-meme (toujours actif a cote de ce script,
-		-- data.lua ~L10185 : DataEvent.OnClientEvent("Observe", <Player>)), donc
-		-- rien a faire cote client pour appliquer le changement de camera.
-		-- DataEvent et spectateTargetsByName ne servent qu'a construire les deux
-		-- closures ci-dessous : isoles dans un do...end imbrique pour liberer
-		-- leurs registres une fois getSpectateOptions/spectatePlayer prets.
-		local getSpectateOptions, spectatePlayer
+		-- Spectate generique (façon EdgeIY/infiniteyield ";spectate") : AUCUNE
+		-- dependance au systeme "observe"/Chakra Sense du jeu - on bascule juste
+		-- CurrentCamera.CameraSubject localement, purement cote client, exactement
+		-- comme le fait Infinite Yield. Ca evite tout aller-retour serveur et
+		-- toute condition de skill/moderateur.
+		-- Cible identifiee en cliquant une entree du VRAI leaderboard du jeu
+		-- (Mainframe.PlayerList.List, celui du Tab - confirme data.lua ~L7153).
+		-- On lit le nom affiche AU MOMENT DU CLIC : pour cliquer un bouton il
+		-- faut d'abord le survoler, et le gestionnaire MouseEnter natif du jeu
+		-- (connecte des la creation de l'entree, donc avant que notre propre
+		-- hook ne la detecte) a deja bascule le texte sur le vrai pseudo Roblox
+		-- (RealName) a ce moment-la - on peut alors le faire correspondre
+		-- directement a Players:GetPlayers(), sans passer par GetPlayerList.
+		-- Etat + fonctions regroupes dans deux tables plutot qu'en locals
+		-- separes, pour rester large sur les registres (voir note en tete de
+		-- fichier).
+		local state = { enabled = false, currentTarget = nil, connected = {} }
+		local M = {}
 
-		do
-			local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
-			local spectateTargetsByName = {}
-
-			getSpectateOptions = function()
-				spectateTargetsByName = {}
-				local names = {}
-
-				local ok, list = pcall(function()
-					return ReplicatedStorage.Events.DataFunction:InvokeServer("GetPlayerList")
-				end)
-				if ok and list then
-					for _, entry in ipairs(list) do
-						local displayName = entry.GameName or entry.RealName
-						if displayName and entry.ID and not spectateTargetsByName[displayName] then
-							spectateTargetsByName[displayName] = entry.ID
-							table.insert(names, displayName)
-						end
-					end
+		function M.findPlayerByDisplayText(text)
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player.Name == text or player.DisplayName == text then
+					return player
 				end
-
-				table.sort(names)
-				return names
 			end
+			return nil
+		end
 
-			spectatePlayer = function(name)
-				local id = spectateTargetsByName[name]
-				if not id then
-					notify("Cible introuvable, actualise la liste.", "error")
-					return
-				end
-				if not DataEvent then
-					notify("ReplicatedStorage.Events.DataEvent introuvable.", "error")
-					return
-				end
-				DataEvent:FireServer("observe", id)
-				notify("Demande de spectate envoyee pour : " .. name .. ".")
+		function M.stopSpectating()
+			state.currentTarget = nil
+			local character = LocalPlayer.Character
+			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+			if humanoid then
+				workspace.CurrentCamera.CameraSubject = humanoid
 			end
 		end
 
-		-- Auto Spectate au clic : quand actif, cliquer une entree du VRAI
-		-- leaderboard du jeu (Mainframe.PlayerList.List, construit par
-		-- updatePlayerList() dans le dump - data.lua ~L1217) envoie directement
-		-- "observe" pour ce joueur - le gestionnaire natif du jeu reste connecte
-		-- a cote du notre (on ne le remplace pas, on ajoute un declencheur de
-		-- plus), donc ca marche meme quand sa condition (Skill "Chakra Sense" ou
-		-- moderateur) n'est pas remplie.
-		-- Association entree -> ID : capturee des l'apparition de chaque entree
-		-- (avant tout survol, donc le texte y est encore au format par defaut
-		-- "GameName[ Title]" - meme formatage que data.lua ~L1268-1278), en le
-		-- comparant a notre propre GetPlayerList. Ca evite de dependre du texte
-		-- "RealName" revele au survol par le gestionnaire natif, dont l'ordre
-		-- d'execution face au notre n'est pas garanti.
-		local setAutoSpectateOnClick
-		do
-			-- Toutes les fonctions internes vivent en champs d'une seule table (M)
-			-- plutot qu'en "local function" separees : 8 locals a plat dans ce bloc
-			-- (un par helper) suffisaient a eux seuls a depasser la limite de 200
-			-- registres. `function M.foo(...)` ne cree pas de nouveau local (juste
-			-- une affectation dans la table M deja existante), donc ce bloc entier
-			-- ne coute que 2 registres (state, M) au lieu de 8.
-			local state = { enabled = false, connected = {}, refreshQueued = false, currentId = nil }
-			local M = {}
-
-			function M.formatDefaultDisplayName(entry)
-				local title = entry.Title or ""
-				if title == "" then return entry.GameName end
-				if title:sub(1, 6) == "of the" then
-					return entry.GameName .. " " .. title
-				end
-				return entry.GameName .. ", " .. title
+		function M.spectate(player)
+			local humanoid = player.Character and player.Character:FindFirstChildWhichIsA("Humanoid")
+			if not humanoid then
+				notify(player.Name .. " n'a pas de personnage charge.", "error")
+				return
 			end
+			workspace.CurrentCamera.CameraSubject = humanoid
+			state.currentTarget = player
+		end
 
-			function M.getPlayerListFrame()
-				local clientGui = PlayerGui:FindFirstChild("ClientGui")
-				local mainframe = clientGui and clientGui:FindFirstChild("Mainframe")
-				local playerList = mainframe and mainframe:FindFirstChild("PlayerList")
-				return playerList and playerList:FindFirstChild("List")
-			end
+		function M.getPlayerListFrame()
+			local clientGui = PlayerGui:FindFirstChild("ClientGui")
+			local mainframe = clientGui and clientGui:FindFirstChild("Mainframe")
+			local playerList = mainframe and mainframe:FindFirstChild("PlayerList")
+			return playerList and playerList:FindFirstChild("List")
+		end
 
-			function M.stopSpectating()
-				state.currentId = nil
-				local character = LocalPlayer.Character
-				local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
-				if humanoid then
-					workspace.CurrentCamera.CameraSubject = humanoid
-				end
-			end
+		function M.onEntryClicked(child)
+			if not state.enabled then return end
+			local nameLabel = child:FindFirstChild("PlayerName")
+			if not nameLabel then return end
+			local player = M.findPlayerByDisplayText(nameLabel.Text)
+			if not player or player == LocalPlayer then return end
 
-			function M.processEntries()
-				local listFrame = M.getPlayerListFrame()
-				if not listFrame then return end
-
-				local ok, list = pcall(function()
-					return ReplicatedStorage.Events.DataFunction:InvokeServer("GetPlayerList")
-				end)
-				if not (ok and list) then return end
-
-				local idByDisplayName = {}
-				for _, entry in ipairs(list) do
-					if entry.GameName and entry.ID then
-						idByDisplayName[M.formatDefaultDisplayName(entry)] = entry.ID
-					end
-				end
-
-				for _, child in ipairs(listFrame:GetChildren()) do
-					if child:IsA("ImageButton") and not state.connected[child] and child:FindFirstChild("PlayerName") then
-						local id = idByDisplayName[child.PlayerName.Text]
-						if id then
-							state.connected[child] = true
-							track(child.MouseButton1Down:Connect(function()
-								if not state.enabled then return end
-								-- Re-clic sur la personne deja spectee : on arrete plutot que
-								-- de renvoyer "observe" (qui ne changerait rien de toute facon).
-								if state.currentId == id then
-									M.stopSpectating()
-									return
-								end
-								local DataEvent = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataEvent")
-								if DataEvent then
-									DataEvent:FireServer("observe", id)
-									state.currentId = id
-								end
-							end))
-							track(child.Destroying:Connect(function()
-								state.connected[child] = nil
-							end))
-						end
-					end
-				end
-			end
-
-			-- Le leaderboard se reconstruit en rafale (plusieurs entrees ajoutees
-			-- d'un coup) : on debounce pour ne faire qu'un seul GetPlayerList par
-			-- rafale plutot qu'un par entree.
-			function M.scheduleProcessEntries()
-				if state.refreshQueued then return end
-				state.refreshQueued = true
-				task.defer(function()
-					state.refreshQueued = false
-					M.processEntries()
-				end)
-			end
-
-			function M.hookPlayerList()
-				local listFrame = M.getPlayerListFrame()
-				if not listFrame then
-					task.delay(2, M.hookPlayerList) -- PlayerList pas encore charge, on reessaie
-					return
-				end
-				track(listFrame.ChildAdded:Connect(M.scheduleProcessEntries))
-				M.scheduleProcessEntries()
-			end
-			M.hookPlayerList()
-
-			setAutoSpectateOnClick = function(newState)
-				state.enabled = newState
+			if state.currentTarget == player then
+				M.stopSpectating()
+			else
+				M.spectate(player)
 			end
 		end
+
+		function M.hookEntry(child)
+			if child:IsA("ImageButton") and not state.connected[child] then
+				state.connected[child] = true
+				track(child.MouseButton1Down:Connect(function()
+					M.onEntryClicked(child)
+				end))
+				track(child.Destroying:Connect(function()
+					state.connected[child] = nil
+				end))
+			end
+		end
+
+		function M.hookPlayerList()
+			local listFrame = M.getPlayerListFrame()
+			if not listFrame then
+				task.delay(2, M.hookPlayerList) -- PlayerList pas encore charge, on reessaie
+				return
+			end
+			for _, child in ipairs(listFrame:GetChildren()) do
+				M.hookEntry(child)
+			end
+			track(listFrame.ChildAdded:Connect(M.hookEntry))
+		end
+		M.hookPlayerList()
 
 		local SpectateSection = addSection(AutresPage, "Spectate Leaderboard")
-		addLabelRow(SpectateSection, "Active, puis clique un joueur dans le leaderboard du jeu (Tab) pour le spectate. Re-clique la meme personne pour arreter. Necessite le Skill \"Chakra Sense\" actif (ou d'etre moderateur) d'apres le jeu - sinon la demande est probablement ignoree par le serveur.")
-		FEATURE_CONTROLS.AutoSpectateOnClick = addToggleRow(SpectateSection, "Auto Spectate au clic (leaderboard du jeu)", Settings.AutoSpectateOnClick, function(state)
-			setAutoSpectateOnClick(state)
-			Settings.AutoSpectateOnClick = state
+		addLabelRow(SpectateSection, "Active, puis clique un joueur dans le leaderboard du jeu (Tab) pour spectate sa camera. Reclique la meme personne pour arreter.")
+		FEATURE_CONTROLS.AutoSpectateOnClick = addToggleRow(SpectateSection, "Spectate au clic (leaderboard)", Settings.AutoSpectateOnClick, function(value)
+			state.enabled = value
+			Settings.AutoSpectateOnClick = value
+			if not value then M.stopSpectating() end
 		end)
-		local spectateSelector = addTeleportSelector(SpectateSection, "Joueur", "Spectate", getSpectateOptions, spectatePlayer)
-		addButtonRow(SpectateSection, "Actualiser la liste", spectateSelector.Refresh)
 	end
 
 	-- Pousse une config chargee vers l'UI (declenche l'onChange normal de
