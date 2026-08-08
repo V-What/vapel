@@ -1,4 +1,6 @@
+print("DEBUG 1")
 local Players = game:GetService("Players")
+print("DEBUG 2")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
@@ -6,9 +8,12 @@ local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
+print("DEBUG 3")
 
 local LocalPlayer = Players.LocalPlayer
+print("DEBUG 4")
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+print("DEBUG 5")
 
 local Theme = {
 	Background = Color3.fromRGB(19, 19, 23),
