@@ -1459,47 +1459,6 @@ do
 	end
 end
 
---------------------------------------------------------------------------------
--- Vendre Tout : appelle le RemoteFunction ReplicatedStorage.Events.DataFunction
--- avec l'action "SellingBulk", d'apres un appel capture manuellement en jeu :
---   Event:InvokeServer("SellingBulk", 3, "Trinket", nil, <HumanoidRootPart>)
--- Deux parametres restent incertains (non confirmes en jeu) :
---   - le "3" : etait le prix affiche lors de la vente testee, pas forcement
---     une quantite ni une valeur libre. On le reutilise tel quel, faute de
---     savoir si le serveur le valide.
---   - le HumanoidRootPart : on suppose que c'est celui du joueur local (a
---     verifier en jeu ; si la vente echoue, il faudra p-e passer celui d'un
---     PNJ marchand a proximite a la place).
--- Liste volontairement courte : ajouter une entree ici suffit pour l'ajouter
--- au menu deroulant "Vendre Tout".
---------------------------------------------------------------------------------
-
-local SELLABLE_ITEM_TYPES = { "Trinket" }
-
-local function sellAllOfType(itemType)
-	local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then
-		notify("Personnage introuvable, impossible de vendre.")
-		return
-	end
-
-	local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
-	if not DataFunction then
-		notify("ReplicatedStorage.Events.DataFunction introuvable.")
-		return
-	end
-
-	local ok, err = pcall(function()
-		DataFunction:InvokeServer("SellingBulk", 3, itemType, nil, rootPart)
-	end)
-
-	if ok then
-		notify("Vente envoyee pour : " .. itemType .. ".")
-	else
-		notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(err))
-	end
-end
-
 local WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT = 420, 340
 local WINDOW_MAX_WIDTH, WINDOW_MAX_HEIGHT = 900, 700
 local TOPBAR_HEIGHT = 84
@@ -2728,6 +2687,44 @@ do
 		setPanicTeleport(state)
 		Settings.PanicTeleportEnabled = state
 	end)
+
+	-- Vendre Tout : appelle le RemoteFunction ReplicatedStorage.Events.DataFunction
+	-- avec l'action "SellingBulk", d'apres un appel capture manuellement en jeu :
+	--   Event:InvokeServer("SellingBulk", 3, "Trinket", nil, <HumanoidRootPart>)
+	-- Deux parametres restent incertains (non confirmes en jeu) :
+	--   - le "3" : etait le prix affiche lors de la vente testee, pas forcement
+	--     une quantite ni une valeur libre. On le reutilise tel quel, faute de
+	--     savoir si le serveur le valide.
+	--   - le HumanoidRootPart : on suppose que c'est celui du joueur local (a
+	--     verifier en jeu ; si la vente echoue, il faudra p-e passer celui d'un
+	--     PNJ marchand a proximite a la place).
+	-- Liste volontairement courte : ajouter une entree ici suffit pour l'ajouter
+	-- au menu deroulant "Vendre Tout".
+	local SELLABLE_ITEM_TYPES = { "Trinket" }
+
+	local function sellAllOfType(itemType)
+		local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if not rootPart then
+			notify("Personnage introuvable, impossible de vendre.")
+			return
+		end
+
+		local DataFunction = ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("DataFunction")
+		if not DataFunction then
+			notify("ReplicatedStorage.Events.DataFunction introuvable.")
+			return
+		end
+
+		local ok, err = pcall(function()
+			DataFunction:InvokeServer("SellingBulk", 3, itemType, nil, rootPart)
+		end)
+
+		if ok then
+			notify("Vente envoyee pour : " .. itemType .. ".")
+		else
+			notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(err))
+		end
+	end
 
 	local SellAllSection = addSection(AutoPage, "Vendre Tout")
 	addLabelRow(SellAllSection, "Beta : vend d'un coup tout ce que tu possedes du type choisi. Le prix envoie au serveur n'est pas confirme fiable, teste en jeu avant de compter dessus.")
