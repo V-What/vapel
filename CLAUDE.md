@@ -29,18 +29,33 @@ regles :
   `local XSection = addSection(...)` suivi de quelques `addXRow(XSection, ...)`)
   dans son propre `do ... end`. Ca libere ses registres a la fin du bloc
   plutot que de les garder ouverts jusqu'a la fin du fichier.
-- Des qu'une section a besoin de PLUSIEURS locals internes (helpers, modules
-  `require`d, tables de lookup) pour construire UNE closure qui sera utilisee
-  plus bas (ex: le handler d'un bouton), forward-declarer cette closure
-  (`local maFonction`) puis la construire a l'interieur d'un `do ... end`
-  imbrique qui capture tous les helpers comme upvalues et se referme aussitot
-  apres (`maFonction = function(...) ... end`). Seule `maFonction` doit
-  survivre en dehors ; tout le reste (le module require, les fonctions de
-  calcul intermediaires...) libere son registre a la fermeture du bloc. Meme
-  pattern que `setAfkAgeUp`/`setPanicTeleport` (haut du fichier) et que les
-  sections "Vendre Tout"/"Spectate Leaderboard" (bloc FEATURE_CONTROLS) - a
-  appliquer par defaut des qu'une section depasse ~4-5 locals internes, pas
-  seulement en reaction a une erreur de compilation.
+- Un `do ... end` imbrique ne libere des registres QUE pour ce qui est
+  declare AVANT lui et se referme avant la suite - il ne fait rien pour des
+  helpers qui sont freres entre eux dans le MEME bloc (ils restent tous
+  ouverts simultanement jusqu'a la fin du bloc, meme nombreux). Deux cas
+  concrets deja rencontres dans ce fichier :
+  - Cas "build puis utilise" (une closure a construire, dont la construction
+    a besoin de plusieurs helpers qui ne servent plus apres) : forward-declarer
+    la closure finale (`local maFonction`), la construire a l'interieur d'un
+    `do ... end` imbrique qui capture les helpers comme upvalues et se
+    referme aussitot apres (`maFonction = function(...) ... end`). Seule
+    `maFonction` doit survivre en dehors. Exemples : `setAfkAgeUp`/
+    `setPanicTeleport` (haut du fichier), section "Vendre Tout".
+  - Cas "plusieurs helpers qui doivent TOUS rester actifs en meme temps"
+    (ex: une feature avec plusieurs fonctions qui s'appellent entre elles et
+    un etat partage, genre hook + callback + scheduler) : le `do...end` seul
+    ne suffit pas puisqu'aucun des helpers ne peut se fermer avant les
+    autres. Regrouper alors l'etat dans UNE table (`local state = { ... }`)
+    et les fonctions en methodes d'UNE autre table plutot qu'en
+    `local function` separees (`function M.foo(...) ... end` est une
+    affectation de champ, pas un nouveau local - donc gratuit en registres).
+    Exemple concret : section "Auto Spectate au clic" (Spectate Leaderboard)
+    - 8 locals a plat (3 d'etat + 5 fonctions) depassaient a eux seuls la
+    limite malgre le `do...end` ; les regrouper dans `state` + `M` a fait
+    tomber le cout de ce bloc a 2 registres.
+  - Par defaut, des qu'une section a plus de ~4-5 locals internes (helpers ou
+    etat), partir directement sur le pattern table(s) plutot que d'essayer le
+    `do...end` seul en premier - plus sur et evite un aller-retour.
 - Ne jamais creer une variable locale par controle UI (toggle/slider/dropdown) :
   ecrire directement dans la table partagee `FEATURE_CONTROLS` (voir le bloc
   `local applyFeatureSettings do ... end` dans `Vapel.lua`), comme c'est deja
