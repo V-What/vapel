@@ -2742,18 +2742,53 @@ do
 	end
 
 	do
-		-- Vendre Tout : appelle le RemoteFunction ReplicatedStorage.Events.DataFunction
-		-- avec l'action "SellingBulk", d'apres un appel capture manuellement en jeu :
-		--   Event:InvokeServer("SellingBulk", 3, "Trinket", nil, <HumanoidRootPart>)
-		-- Deux parametres restent incertains (non confirmes en jeu) :
-		--   - le "3" : etait le prix affiche lors de la vente testee, pas forcement
-		--     une quantite ni une valeur libre. On le reutilise tel quel, faute de
-		--     savoir si le serveur le valide.
-		--   - le HumanoidRootPart : on suppose que c'est celui du joueur local (a
-		--     verifier en jeu ; si la vente echoue, il faudra p-e passer celui d'un
-		--     PNJ marchand a proximite a la place).
-		-- Liste volontairement courte : ajouter une entree ici suffit pour l'ajouter
-		-- au menu deroulant "Vendre Tout".
+		-- Vendre Tout : reproduit le flux reel de vente en masse aux PNJ marchands,
+		-- reconstruit depuis un dump client decompile (data.lua ~L5457 et ~L7194,
+		-- LocalScript "Potassium's decompiler"). Le vrai client, quand on appuie sur
+		-- E pres d'un PNJ puis choisit l'option de vente en masse :
+		--   1. Trouve le PNJ via GameManager:findNearbyNPC(HumanoidRootPart.CFrame)
+		--      et prend son HumanoidRootPart (sinon .Main, sinon le Model) comme
+		--      5e argument ("dialogPart") - PAS le HumanoidRootPart du joueur.
+		--   2. Calcule le vrai prix via GameManager:calculateBulk(Inventory, Loadout,
+		--      Type, nil) puis GameManager:getModifiedPrice(valeur, relationVillage,
+		--      economie, "Sell") - ce n'est pas une valeur libre.
+		--   3. Appelle DataFunction:InvokeServer("SellingBulk", prix, Type, nil, dialogPart).
+		-- GameManager est un ModuleScript ordinaire sous ReplicatedStorage (require(
+		-- ReplicatedStorage.GameManager) dans le dump), donc requerable directement
+		-- ici comme le vrai client le fait, plutot que de deviner le calcul de prix.
+		local GameManager = require(ReplicatedStorage.GameManager)
+
+		local function lookupVillageData(villageData, month, week, village)
+			return villageData["Month" .. month]["Week" .. week][village]
+		end
+
+		local function getEconomy(villageData, month, week, village)
+			if village == "Rogue" then return "Struggling" end
+			if village == "Neutral" or not village then return "Average" end
+			return lookupVillageData(villageData, month, week, village).Politics.Economy
+		end
+
+		local function getVillageRelationship(villageData, month, week, villageA, villageB)
+			if not (villageA and villageB) then return nil end
+			if villageA == "Rogue" or villageB == "Rogue" then return "War" end
+			if villageA == "Neutral" or villageB == "Neutral" then return "Neutral" end
+			if villageA == villageB then return "Own" end
+
+			local dataA = lookupVillageData(villageData, month, week, villageA)
+			local dataB = lookupVillageData(villageData, month, week, villageB)
+			if table.find(dataA.Politics.Alliances, villageB) or table.find(dataB.Politics.Alliances, villageA) then
+				return "Allied"
+			end
+			if table.find(dataA.Politics.Wars, villageB) or table.find(dataB.Politics.Wars, villageA) then
+				return "War"
+			end
+			return "Neutral"
+		end
+
+		local function getNpcDialogPart(npc)
+			return npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Main") or npc
+		end
+
 		local SELLABLE_ITEM_TYPES = { "Trinket" }
 
 		local function sellAllOfType(itemType)
@@ -2769,19 +2804,44 @@ do
 				return
 			end
 
-			local ok, err = pcall(function()
-				DataFunction:InvokeServer("SellingBulk", 3, itemType, nil, rootPart)
+			local ok, result = pcall(function()
+				local npc = GameManager:findNearbyNPC(rootPart.CFrame)
+				if type(npc) == "boolean" then
+					return "no_npc"
+				end
+				local dialogPart = getNpcDialogPart(npc)
+
+				local playerData = DataFunction:InvokeServer("GetData")
+				if not playerData then
+					return "no_data"
+				end
+
+				local villageData, month, week = DataFunction:InvokeServer("getVillageData")
+				local npcVillage = dialogPart:GetAttribute("Village")
+				local relationship = getVillageRelationship(villageData, month, week, playerData.Village, npcVillage)
+				local economy = getEconomy(villageData, month, week, npcVillage)
+
+				local rawValue = GameManager:calculateBulk(playerData.Inventory, playerData.Loadout, itemType, nil)
+				local price = GameManager:getModifiedPrice(rawValue, relationship, economy, "Sell")
+
+				return DataFunction:InvokeServer("SellingBulk", price, itemType, nil, dialogPart)
 			end)
 
-			if ok then
-				notify("Vente envoyee pour : " .. itemType .. ".")
+			if not ok then
+				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(result))
+			elseif result == "no_npc" then
+				notify("Aucun PNJ marchand a proximite. Approche-toi d'un vendeur.")
+			elseif result == "no_data" then
+				notify("Impossible de recuperer tes donnees joueur.")
+			elseif result == true then
+				notify("Vente reussie : " .. itemType .. ".")
 			else
-				notify("Erreur lors de la vente de " .. itemType .. " : " .. tostring(err))
+				notify("Vente refusee par le serveur pour : " .. itemType .. ".")
 			end
 		end
 
 		local SellAllSection = addSection(AutoPage, "Vendre Tout")
-		addLabelRow(SellAllSection, "Beta : vend d'un coup tout ce que tu possedes du type choisi. Le prix envoie au serveur n'est pas confirme fiable, teste en jeu avant de compter dessus.")
+		addLabelRow(SellAllSection, "Vend d'un coup tout ce que tu possedes du type choisi au PNJ marchand le plus proche. Approche-toi d'un vendeur avant de cliquer.")
 		FEATURE_CONTROLS.SelectedSellType = addDropdownRow(SellAllSection, "Type d'objet", SELLABLE_ITEM_TYPES, Settings.SelectedSellType, function(v)
 			Settings.SelectedSellType = v
 		end)
