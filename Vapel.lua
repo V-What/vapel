@@ -34,19 +34,28 @@ local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Valeurs de depart uniquement : Skin.set() (plus bas, juste apres le
+-- chargement des Prefs) ecrase ces champs avec le theme choisi et les repeint
+-- a chaque changement. Ne pas lire Theme au moment de creer une instance sans
+-- passer par Skin.paint, sinon la couleur est figee a la creation et ne suivra
+-- plus les changements de theme.
 local Theme = {
-	Background = Color3.fromRGB(19, 19, 23),
-	Panel = Color3.fromRGB(28, 28, 34),
-	PanelLight = Color3.fromRGB(33, 33, 40), -- haut des gradients de card, legerement plus clair que Panel
-	Element = Color3.fromRGB(40, 40, 48),
-	ElementHover = Color3.fromRGB(50, 50, 60),
-	Stroke = Color3.fromRGB(56, 56, 66),
-	Accent = Color3.fromRGB(120, 141, 255),
-	AccentDim = Color3.fromRGB(90, 106, 199), -- accent assombri, utilise dans les gradients
-	Danger = Color3.fromRGB(235, 90, 90),
-	Success = Color3.fromRGB(90, 220, 130),
-	Text = Color3.fromRGB(240, 240, 245),
-	SubText = Color3.fromRGB(150, 150, 160),
+	Background = Color3.fromRGB(15, 17, 19),
+	Panel = Color3.fromRGB(23, 26, 29),
+	PanelLight = Color3.fromRGB(29, 33, 38), -- haut des gradients de card, legerement plus clair que Panel
+	Element = Color3.fromRGB(29, 33, 38),
+	ElementHover = Color3.fromRGB(33, 37, 41),
+	Stroke = Color3.fromRGB(38, 42, 47),
+	StrokeStrong = Color3.fromRGB(51, 57, 64), -- filet appuye : bordure au survol, contour ouvert
+	Accent = Color3.fromRGB(230, 233, 236),
+	AccentDim = Color3.fromRGB(185, 190, 196), -- accent assombri, utilise dans les gradients
+	OnAccent = Color3.fromRGB(15, 17, 19), -- texte/icone POSE sur un fond Accent
+	Danger = Color3.fromRGB(217, 88, 75),
+	Warn = Color3.fromRGB(217, 164, 65),
+	Success = Color3.fromRGB(76, 175, 109),
+	Text = Color3.fromRGB(230, 233, 236),
+	SubText = Color3.fromRGB(121, 128, 138),
+	SubTextDim = Color3.fromRGB(91, 98, 107), -- texte tertiaire : placeholders, unites
 }
 
 --------------------------------------------------------------------------------
@@ -94,6 +103,7 @@ local DEFAULT_PREFS = {
 	MenuKeybind = "RightControl",
 	InventoryWebhookUrl = "https://discord.com/api/webhooks/1534652533186887800/X3KqFqpuIBdQa7DqWJI7U0Gg1PA2FiB76cj78HOKBEkxftwCiPW3fwNYipO3p77rhT-u",
 	ShowKeybindHud = false,
+	MenuTheme = "Graphite",
 }
 
 local Prefs = {}
@@ -112,6 +122,159 @@ end
 local function savePrefs()
 	writeJSON(PREFS_FILE, Prefs)
 end
+
+--------------------------------------------------------------------------------
+-- Themes de couleur
+--------------------------------------------------------------------------------
+-- La table Theme (definie plus haut) reste LA table lue partout dans le
+-- fichier : changer de theme ecrase ses champs au lieu de remplacer la table,
+-- pour que tout le code existant qui fait `Theme.Accent` continue de marcher
+-- sans etre touche.
+--
+-- Mais Roblox COPIE la couleur au moment de la creation de l'instance
+-- (`BackgroundColor3 = Theme.Panel` prend la valeur, pas une reference) : muter
+-- Theme ne repeint donc rien tout seul. D'ou Skin.paint, par lequel passent
+-- toutes les instances du menu : il retient quelle propriete suit quel jeton et
+-- les repeint toutes d'un coup au changement de theme.
+--
+-- Regle de couleur commune aux 6 themes : Success / Warn / Danger ne sont
+-- JAMAIS l'accent. Ils veulent toujours dire la meme chose (ca va / attention /
+-- probleme), sinon "actif" et "ca va" auraient la meme couleur - c'est pour ca
+-- que Jade garde un ambre pour Warn au lieu de recycler son vert.
+--
+-- Tout est regroupe dans UNE table (etat + fonctions) plutot qu'en locals
+-- separes : le fichier entier est une seule fonction Luau limitee a 200
+-- registres locaux (voir la note en tete de fichier).
+local Skin = {
+	current = nil,
+	registry = {}, -- { { inst = <Instance>, map = { Propriete = "NomDeJeton" } }, ... }
+	byInst = {},   -- inst -> son entree dans registry, pour pouvoir la retrouver
+	order = { "Graphite", "Ambre", "Jade", "Indigo", "Rouille", "Papier" },
+}
+
+Skin.themes = {
+	-- Achromatique : l'accent EST le blanc du texte. La couleur ne sert qu'aux etats.
+	Graphite = {
+		Background = Color3.fromRGB(15, 17, 19), Panel = Color3.fromRGB(23, 26, 29),
+		PanelLight = Color3.fromRGB(29, 33, 38), Element = Color3.fromRGB(29, 33, 38),
+		ElementHover = Color3.fromRGB(33, 37, 41), Stroke = Color3.fromRGB(38, 42, 47),
+		StrokeStrong = Color3.fromRGB(51, 57, 64), Text = Color3.fromRGB(230, 233, 236),
+		SubText = Color3.fromRGB(121, 128, 138), SubTextDim = Color3.fromRGB(91, 98, 107),
+		Accent = Color3.fromRGB(230, 233, 236), AccentDim = Color3.fromRGB(185, 190, 196),
+		OnAccent = Color3.fromRGB(15, 17, 19), Success = Color3.fromRGB(76, 175, 109),
+		Warn = Color3.fromRGB(217, 164, 65), Danger = Color3.fromRGB(217, 88, 75),
+	},
+	-- Ambre sur graphite froid : couleur d'instrument, lisible sur toute scene.
+	Ambre = {
+		Background = Color3.fromRGB(20, 22, 26), Panel = Color3.fromRGB(26, 29, 34),
+		PanelLight = Color3.fromRGB(32, 36, 41), Element = Color3.fromRGB(32, 36, 41),
+		ElementHover = Color3.fromRGB(35, 39, 47), Stroke = Color3.fromRGB(43, 48, 56),
+		StrokeStrong = Color3.fromRGB(56, 63, 73), Text = Color3.fromRGB(221, 226, 234),
+		SubText = Color3.fromRGB(124, 133, 147), SubTextDim = Color3.fromRGB(93, 101, 114),
+		Accent = Color3.fromRGB(232, 163, 61), AccentDim = Color3.fromRGB(184, 128, 45),
+		OnAccent = Color3.fromRGB(20, 22, 26), Success = Color3.fromRGB(94, 210, 142),
+		Warn = Color3.fromRGB(232, 163, 61), Danger = Color3.fromRGB(224, 104, 92),
+	},
+	-- Le plus calme : gris violace, vert sourd.
+	Jade = {
+		Background = Color3.fromRGB(23, 22, 28), Panel = Color3.fromRGB(30, 29, 37),
+		PanelLight = Color3.fromRGB(37, 36, 46), Element = Color3.fromRGB(37, 36, 46),
+		ElementHover = Color3.fromRGB(42, 41, 51), Stroke = Color3.fromRGB(44, 42, 53),
+		StrokeStrong = Color3.fromRGB(59, 57, 71), Text = Color3.fromRGB(237, 234, 242),
+		SubText = Color3.fromRGB(139, 135, 160), SubTextDim = Color3.fromRGB(106, 103, 128),
+		Accent = Color3.fromRGB(92, 201, 167), AccentDim = Color3.fromRGB(70, 156, 129),
+		OnAccent = Color3.fromRGB(15, 38, 32), Success = Color3.fromRGB(92, 201, 167),
+		Warn = Color3.fromRGB(224, 177, 94), Danger = Color3.fromRGB(224, 122, 130),
+	},
+	-- Le plus proche de l'ancien menu, pour qui veut la continuite.
+	Indigo = {
+		Background = Color3.fromRGB(19, 19, 25), Panel = Color3.fromRGB(27, 27, 35),
+		PanelLight = Color3.fromRGB(34, 34, 44), Element = Color3.fromRGB(34, 34, 44),
+		ElementHover = Color3.fromRGB(38, 38, 47), Stroke = Color3.fromRGB(43, 43, 55),
+		StrokeStrong = Color3.fromRGB(57, 57, 72), Text = Color3.fromRGB(233, 234, 242),
+		SubText = Color3.fromRGB(130, 134, 160), SubTextDim = Color3.fromRGB(98, 102, 126),
+		Accent = Color3.fromRGB(120, 141, 255), AccentDim = Color3.fromRGB(90, 107, 199),
+		OnAccent = Color3.fromRGB(12, 14, 28), Success = Color3.fromRGB(90, 220, 130),
+		Warn = Color3.fromRGB(230, 184, 79), Danger = Color3.fromRGB(235, 90, 90),
+	},
+	-- Le seul aux neutres chauds : des bruns, pas des gris.
+	Rouille = {
+		Background = Color3.fromRGB(22, 18, 15), Panel = Color3.fromRGB(30, 24, 21),
+		PanelLight = Color3.fromRGB(37, 30, 26), Element = Color3.fromRGB(37, 30, 26),
+		ElementHover = Color3.fromRGB(41, 32, 25), Stroke = Color3.fromRGB(47, 38, 32),
+		StrokeStrong = Color3.fromRGB(63, 52, 44), Text = Color3.fromRGB(239, 231, 223),
+		SubText = Color3.fromRGB(154, 139, 126), SubTextDim = Color3.fromRGB(118, 106, 95),
+		Accent = Color3.fromRGB(210, 96, 58), AccentDim = Color3.fromRGB(162, 74, 44),
+		OnAccent = Color3.fromRGB(24, 15, 10), Success = Color3.fromRGB(120, 179, 107),
+		Warn = Color3.fromRGB(217, 164, 65), Danger = Color3.fromRGB(217, 88, 75),
+	},
+	-- Clair. Attention : eblouit sur une scene de jeu sombre, c'est assume.
+	Papier = {
+		Background = Color3.fromRGB(237, 238, 241), Panel = Color3.fromRGB(248, 249, 250),
+		PanelLight = Color3.fromRGB(255, 255, 255), Element = Color3.fromRGB(255, 255, 255),
+		ElementHover = Color3.fromRGB(228, 231, 235), Stroke = Color3.fromRGB(215, 218, 224),
+		StrokeStrong = Color3.fromRGB(180, 186, 195), Text = Color3.fromRGB(21, 23, 28),
+		SubText = Color3.fromRGB(102, 109, 120), SubTextDim = Color3.fromRGB(148, 154, 163),
+		Accent = Color3.fromRGB(184, 65, 43), AccentDim = Color3.fromRGB(142, 49, 33),
+		OnAccent = Color3.fromRGB(255, 255, 255), Success = Color3.fromRGB(46, 125, 82),
+		Warn = Color3.fromRGB(168, 112, 26), Danger = Color3.fromRGB(184, 65, 43),
+	},
+}
+
+-- Enregistre `inst` comme suivant le theme et applique les couleurs tout de
+-- suite. map : { NomDePropriete = "NomDeJetonDansTheme" }. Renvoie inst pour
+-- pouvoir s'ecrire en enveloppe autour de create(...).
+--
+-- Rappeler paint sur la MEME instance met a jour son mapping au lieu d'ajouter
+-- une seconde entree : c'est ce qui permet a un controle de changer de jeton
+-- selon son etat (un switch passe de "StrokeStrong" a "Accent" quand on
+-- l'active) sans que le registre gonfle ni qu'un changement de theme le
+-- repeigne avec son jeton d'origine.
+function Skin.paint(inst, map)
+	local entry = Skin.byInst[inst]
+	if entry then
+		for prop, token in pairs(map) do
+			entry.map[prop] = token
+		end
+	else
+		entry = { inst = inst, map = map }
+		Skin.byInst[inst] = entry
+		table.insert(Skin.registry, entry)
+	end
+	for prop, token in pairs(map) do
+		inst[prop] = Theme[token]
+	end
+	return inst
+end
+
+function Skin.set(name)
+	local theme = Skin.themes[name]
+	if not theme then return end
+	Skin.current = name
+	for key, color in pairs(theme) do
+		Theme[key] = color
+	end
+	-- Repeint tout le registre. Les instances detruites entre-temps (dropdown
+	-- reconstruit par addTeleportSelector, toast expire...) font echouer
+	-- l'affectation : on les sort du registre au passage plutot que de le
+	-- laisser grossir indefiniment.
+	local kept = {}
+	for _, entry in ipairs(Skin.registry) do
+		local ok = pcall(function()
+			for prop, token in pairs(entry.map) do
+				entry.inst[prop] = Theme[token]
+			end
+		end)
+		if ok then
+			table.insert(kept, entry)
+		else
+			Skin.byInst[entry.inst] = nil
+		end
+	end
+	Skin.registry = kept
+end
+
+Skin.set(Prefs.MenuTheme or "Graphite")
 
 -- Enum.KeyCode[nom_invalide] leve une erreur (contrairement a un simple index
 -- de table) : on protege la resolution au cas ou le JSON aurait ete corrompu
@@ -932,12 +1095,16 @@ ScreenGui.Parent = PlayerGui
 -- Regroupees dans une seule table plutot que des locals separes : le fichier
 -- entier est une seule fonction Luau (limite de 200 registres locaux), voir
 -- la note en tete de fichier.
+-- Token (et pas une Color3) : la couleur est lue dans Theme au moment ou le
+-- toast est cree, donc elle suit le theme courant (voir Skin en tete de
+-- fichier). Un toast dure quelques secondes, pas la peine de le repeindre en
+-- cours de route s'il est a l'ecran pile au changement de theme.
 local TOAST = {
-	Width = 320,
+	Width = 300,
 	Kinds = {
-		info = { Color = Theme.Accent, Glyph = "●" },
-		success = { Color = Theme.Success, Glyph = "✓" },
-		error = { Color = Theme.Danger, Glyph = "✕" },
+		info = { Token = "Accent", Glyph = "●" },
+		success = { Token = "Success", Glyph = "✓" },
+		error = { Token = "Danger", Glyph = "✕" },
 	},
 }
 local activeToasts = {} -- max 4 toasts visibles simultanement (voir notify)
@@ -961,6 +1128,7 @@ local function notify(text, kind, duration)
 	if unloaded then return end
 	duration = duration or 3.5
 	local style = TOAST.Kinds[kind] or TOAST.Kinds.info
+	local styleColor = Theme[style.Token]
 
 	-- Rafale de notifications : on vire tout de suite les plus anciennes en
 	-- trop plutot que de laisser la pile grossir indefiniment.
@@ -976,11 +1144,11 @@ local function notify(text, kind, duration)
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 	}, ToastHolder)
-	corner(toast, 10)
+	corner(toast, 4)
 	local stroke = create("UIStroke", { Color = Theme.Stroke, Transparency = 1 }, toast)
 	create("UIPadding", {
-		PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
-		PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 11), PaddingRight = UDim.new(0, 11),
 	}, toast)
 	create("UIListLayout", {
 		FillDirection = Enum.FillDirection.Vertical,
@@ -1003,32 +1171,32 @@ local function notify(text, kind, duration)
 	}, HeaderRow)
 
 	local IconChip = create("Frame", {
-		Size = UDim2.new(0, 26, 0, 26),
-		BackgroundColor3 = style.Color,
+		Size = UDim2.new(0, 20, 0, 20),
+		BackgroundColor3 = styleColor,
 		BackgroundTransparency = 1,
 		LayoutOrder = 1,
 	}, HeaderRow)
-	corner(IconChip, 13)
-	local iconStroke = create("UIStroke", { Color = style.Color, Transparency = 1 }, IconChip)
+	corner(IconChip, 3)
+	local iconStroke = create("UIStroke", { Color = styleColor, Transparency = 1 }, IconChip)
 	local glyph = create("TextLabel", {
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		Text = style.Glyph,
 		Font = Enum.Font.GothamBold,
-		TextSize = 14,
-		TextColor3 = style.Color,
+		TextSize = 15,
+		TextColor3 = styleColor,
 		TextTransparency = 1,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Center,
 	}, IconChip)
 
 	local label = create("TextLabel", {
-		Size = UDim2.new(0, TOAST.Width - 24 - 26 - 10, 0, 0),
+		Size = UDim2.new(0, TOAST.Width - 22 - 20 - 10, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
-		TextSize = 14,
+		TextSize = 15,
 		TextColor3 = Theme.Text,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -1045,7 +1213,7 @@ local function notify(text, kind, duration)
 	corner(ProgressTrack, 2)
 	local ProgressFill = create("Frame", {
 		Size = UDim2.new(1, 0, 1, 0),
-		BackgroundColor3 = style.Color,
+		BackgroundColor3 = styleColor,
 		BackgroundTransparency = 1,
 	}, ProgressTrack)
 	corner(ProgressFill, 2)
@@ -1693,7 +1861,15 @@ end
 
 local WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT = 420, 340
 local WINDOW_MAX_WIDTH, WINDOW_MAX_HEIGHT = 900, 700
-local TOPBAR_HEIGHT = 84
+
+-- Chassis "Compact" : barre de titre fine, onglets en bande horizontale sous
+-- la barre de titre (plus de colonne laterale : sa largeur revient au
+-- contenu), et barre d'etat en bas. Regroupes dans une table plutot qu'en
+-- constantes separees (limite des 200 registres - voir la note en tete de
+-- fichier) ; MenuChrome recoit plus bas les instances qu'il faut retrouver
+-- depuis ailleurs (recherche, barre d'etat).
+local MenuChrome = { TopBar = 44, Tabs = 34, Status = 24, bands = {}, rows = {}, blocks = {}, drops = {} }
+local TOPBAR_HEIGHT = MenuChrome.TopBar
 
 -- Taille "cible" (celle vers laquelle on anime a l'ouverture, et que le
 -- redimensionnement met a jour) ; separee de Main.Size car cette derniere
@@ -1703,38 +1879,23 @@ local targetSize = UDim2.new(
 	0, math.clamp(Prefs.WindowHeight, WINDOW_MIN_HEIGHT, WINDOW_MAX_HEIGHT)
 )
 
--- Halo/ombre douce derriere la fenetre (deux frames superposees : un glow
--- teinte accent tres transparent, une ombre noire plus resserree) : donne un
--- effet "flottant" sans dependre d'une image externe (fiable sur tout executeur).
-local WindowGlow = create("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	BackgroundColor3 = Theme.Accent,
-	BackgroundTransparency = 0.92,
-	ZIndex = 0,
-	Visible = false,
-}, ScreenGui)
-corner(WindowGlow, 24)
+-- Il y avait ici un halo (Frame teinte accent) + une ombre (Frame noire),
+-- tous deux plus grands que la fenetre et poses derriere pour donner un effet
+-- "flottant". Retire : Roblox ne sait pas flouter un Frame, donc c'etait deux
+-- rectangles nets aux bords francs autour de la fenetre - ca se voyait comme
+-- un halo sale plutot que comme une ombre. Le contour de 1 px sur Main suffit
+-- a detacher la fenetre du jeu.
 
-local WindowShadow = create("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	BackgroundColor3 = Color3.new(0, 0, 0),
-	BackgroundTransparency = 0.45,
-	ZIndex = 0,
-	Visible = false,
-}, ScreenGui)
-corner(WindowShadow, 14)
-
-local Main = create("Frame", {
+local Main = Skin.paint(create("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.new(0.5, 0, 0.5, 0),
 	Size = targetSize,
-	BackgroundColor3 = Theme.Background,
 	Visible = false,
 	Active = true,
 	ZIndex = 1,
-}, ScreenGui)
-corner(Main, 12)
-create("UIStroke", { Color = Theme.Stroke, Transparency = 0.2 }, Main)
+}, ScreenGui), { BackgroundColor3 = "Background" })
+corner(Main, 5)
+Skin.paint(create("UIStroke", { Transparency = 0 }, Main), { Color = "Stroke" })
 
 -- Ecran de "chargement" joue a chaque ouverture : masque le contenu derriere
 -- un voile + 3 points qui pulsent en cascade, puis se dissout pour reveler le
@@ -1808,21 +1969,8 @@ local function playLoadingIntro()
 	end)
 end
 
-local function syncWindowHalo()
-	local pos, size = Main.Position, Main.Size
-	WindowGlow.Position = pos
-	WindowGlow.Size = UDim2.new(0, size.X.Offset + 50, 0, size.Y.Offset + 50)
-	WindowShadow.Position = pos
-	WindowShadow.Size = UDim2.new(0, size.X.Offset + 16, 0, size.Y.Offset + 16)
-end
-syncWindowHalo()
-Main:GetPropertyChangedSignal("Position"):Connect(syncWindowHalo)
-Main:GetPropertyChangedSignal("Size"):Connect(syncWindowHalo)
-
--- Animation d'ouverture/fermeture "pro" : leger zoom (96% -> 100%, aucun
--- rebond) + fondu du halo, plutot que l'ancien pop depuis une taille nulle.
-local WINDOW_GLOW_TRANSPARENCY = 0.92
-local WINDOW_SHADOW_TRANSPARENCY = 0.45
+-- Animation d'ouverture/fermeture : leger zoom (96% -> 100%, aucun rebond),
+-- plutot que l'ancien pop depuis une taille nulle.
 local WINDOW_OPEN_SCALE = 0.96
 
 local function scaledSize(size, factor)
@@ -1831,15 +1979,9 @@ end
 
 local function openWindow()
 	Main.Visible = true
-	WindowGlow.Visible = true
-	WindowShadow.Visible = true
-	WindowGlow.BackgroundTransparency = 1
-	WindowShadow.BackgroundTransparency = 1
 	Main.Size = scaledSize(targetSize, WINDOW_OPEN_SCALE)
 
 	tweenStyled(Main, { Size = targetSize }, 0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	tween(WindowGlow, { BackgroundTransparency = WINDOW_GLOW_TRANSPARENCY }, 0.28)
-	tween(WindowShadow, { BackgroundTransparency = WINDOW_SHADOW_TRANSPARENCY }, 0.28)
 	playLoadingIntro()
 end
 
@@ -1849,12 +1991,8 @@ local function closeWindow()
 		TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
 		{ Size = scaledSize(targetSize, WINDOW_OPEN_SCALE) }
 	)
-	tween(WindowGlow, { BackgroundTransparency = 1 }, 0.14)
-	tween(WindowShadow, { BackgroundTransparency = 1 }, 0.14)
 	closeTween.Completed:Connect(function()
 		Main.Visible = false
-		WindowGlow.Visible = false
-		WindowShadow.Visible = false
 		LoadingOverlay.Visible = false
 		Main.Size = targetSize -- pret pour la prochaine ouverture
 	end)
@@ -1937,7 +2075,7 @@ local ProgressLabel = create("TextLabel", {
 	BackgroundTransparency = 1,
 	Text = "Chargement... 0%",
 	Font = Enum.Font.GothamMedium,
-	TextSize = 12,
+	TextSize = 14,
 	TextColor3 = Theme.SubText,
 	ZIndex = 26,
 }, InjectionOverlay)
@@ -1949,14 +2087,8 @@ local function playInjectionSplash()
 	ProgressLabel.Text = "Chargement... 0%"
 
 	Main.Visible = true
-	WindowGlow.Visible = true
-	WindowShadow.Visible = true
-	WindowGlow.BackgroundTransparency = 1
-	WindowShadow.BackgroundTransparency = 1
 	Main.Size = scaledSize(targetSize, WINDOW_OPEN_SCALE)
 	tweenStyled(Main, { Size = targetSize }, 0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	tween(WindowGlow, { BackgroundTransparency = WINDOW_GLOW_TRANSPARENCY }, 0.28)
-	tween(WindowShadow, { BackgroundTransparency = WINDOW_SHADOW_TRANSPARENCY }, 0.28)
 
 	local DURATION = 1.1
 	local startTime = os.clock()
@@ -1984,68 +2116,81 @@ end
 -- fond de Main (plus de "barre noire" separee).
 local TopBar = create("Frame", { Size = UDim2.new(1, 0, 0, TOPBAR_HEIGHT), BackgroundTransparency = 1 }, Main)
 
--- Logo : monogramme "V" en attendant un vrai logo (remplace juste ce Frame
--- par une ImageLabel avec Image = "rbxassetid://..." le jour ou tu en as un).
-local LOGO_SIZE = 56
-local Logo = create("Frame", {
-	Position = UDim2.new(0, 14, 0, (TOPBAR_HEIGHT - LOGO_SIZE) / 2),
-	Size = UDim2.new(0, LOGO_SIZE, 0, LOGO_SIZE),
-	BackgroundColor3 = Theme.Accent,
-}, TopBar)
-corner(Logo, 15)
-gradient(Logo, ColorSequence.new(Theme.Accent, Theme.AccentDim), 45)
-create("UIStroke", { Color = Color3.new(1, 1, 1), Transparency = 0.85, Thickness = 1 }, Logo)
-create("TextLabel", {
-	Size = UDim2.new(1, 0, 1, 0),
-	BackgroundTransparency = 1,
-	Text = "V",
-	Font = Enum.Font.GothamBold,
-	TextSize = 30,
-	TextColor3 = Color3.new(1, 1, 1),
-}, Logo)
+-- Fond de la barre de titre : un ton au-dessus du fond de fenetre, comme la
+-- bande d'onglets et la barre d'etat - les trois cadres du chassis se lisent
+-- ainsi comme un meme calque autour du contenu.
+Skin.paint(TopBar, { BackgroundColor3 = "Panel" })
+TopBar.BackgroundTransparency = 0
+Skin.paint(create("Frame", { -- filet de separation (pas de UIStroke : il ferait le tour)
+	Position = UDim2.new(0, 0, 1, -1),
+	Size = UDim2.new(1, 0, 0, 1),
+	BorderSizePixel = 0,
+}, TopBar), { BackgroundColor3 = "Stroke" })
 
-local titleLeft = 14 + LOGO_SIZE + 12
-local titleWidth = 1 -- Scale ; l'offset negatif ci-dessous laisse la place au bouton fermer
-local TITLE_HEIGHT, SUBTITLE_HEIGHT, TITLE_GAP = 28, 18, 4
-local titleTop = (TOPBAR_HEIGHT - (TITLE_HEIGHT + TITLE_GAP + SUBTITLE_HEIGHT)) / 2
-
-create("TextLabel", {
+Skin.paint(create("TextLabel", {
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, titleLeft, 0, titleTop),
-	Size = UDim2.new(titleWidth, -(titleLeft + 54), 0, TITLE_HEIGHT),
+	Position = UDim2.new(0, 10, 0, 0),
+	Size = UDim2.new(0, 96, 1, 0),
 	Text = "Von Client",
 	Font = Enum.Font.GothamBold,
-	TextSize = 26,
-	TextColor3 = Theme.Text,
+	TextSize = 15,
 	TextXAlignment = Enum.TextXAlignment.Left,
-}, TopBar)
+}, TopBar), { TextColor3 = "Text" })
 
-create("TextLabel", {
+Skin.paint(create("TextLabel", {
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, titleLeft, 0, titleTop + TITLE_HEIGHT + TITLE_GAP),
-	Size = UDim2.new(titleWidth, -(titleLeft + 54), 0, SUBTITLE_HEIGHT),
-	Text = "Menu de controle",
-	Font = Enum.Font.GothamMedium,
+	Position = UDim2.new(0, 106, 0, 0),
+	Size = UDim2.new(0, 44, 1, 0),
+	Text = "v2.4",
+	Font = Enum.Font.Code,
 	TextSize = 13,
-	TextColor3 = Theme.SubText,
 	TextXAlignment = Enum.TextXAlignment.Left,
-}, TopBar)
+}, TopBar), { TextColor3 = "SubTextDim" })
 
-local CloseButton = create("TextButton", {
+-- Recherche : filtre les lignes de la page courante par leur libelle, et
+-- masque les sections qui n'ont plus rien a montrer. Le filtrage lui-meme vit
+-- dans MenuChrome.applyFilter (defini apres addSection, qui enregistre les
+-- lignes au fur et a mesure).
+local SearchBar = Skin.paint(create("Frame", {
 	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -16, 0.5, 0),
-	Size = UDim2.new(0, 38, 0, 38),
-	BackgroundColor3 = Theme.Element,
-	Text = "X",
+	Position = UDim2.new(1, -52, 0.5, 0),
+	Size = UDim2.new(0, 190, 0, 26),
+}, TopBar), { BackgroundColor3 = "Background" })
+corner(SearchBar, 3)
+Skin.paint(create("UIStroke", { Transparency = 0 }, SearchBar), { Color = "Stroke" })
+
+MenuChrome.Search = Skin.paint(create("TextBox", {
+	Size = UDim2.new(1, -18, 1, 0),
+	Position = UDim2.new(0, 9, 0, 0),
+	BackgroundTransparency = 1,
+	Text = "",
+	PlaceholderText = "Rechercher un reglage",
+	Font = Enum.Font.GothamMedium,
+	TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ClearTextOnFocus = false,
+}, SearchBar), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+
+local CloseButton = Skin.paint(create("TextButton", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -8, 0.5, 0),
+	Size = UDim2.new(0, 30, 0, 26),
+	BackgroundTransparency = 1,
+	Text = "✕",
 	Font = Enum.Font.GothamBold,
-	TextSize = 18,
-	TextColor3 = Theme.Text,
+	TextSize = 15,
 	AutoButtonColor = false,
-}, TopBar)
-corner(CloseButton, 10)
+}, TopBar), { TextColor3 = "SubText", BackgroundColor3 = "ElementHover" })
+corner(CloseButton, 3)
 CloseButton.MouseButton1Click:Connect(closeWindow)
-CloseButton.MouseEnter:Connect(function() tween(CloseButton, { BackgroundColor3 = Theme.Danger }, 0.1) end)
-CloseButton.MouseLeave:Connect(function() tween(CloseButton, { BackgroundColor3 = Theme.Element }, 0.1) end)
+CloseButton.MouseEnter:Connect(function()
+	CloseButton.BackgroundTransparency = 0
+	tween(CloseButton, { TextColor3 = Theme.Text }, 0.1)
+end)
+CloseButton.MouseLeave:Connect(function()
+	CloseButton.BackgroundTransparency = 1
+	tween(CloseButton, { TextColor3 = Theme.SubText }, 0.1)
+end)
 
 -- Drag de la fenetre (via la barre de titre)
 do
@@ -2070,16 +2215,15 @@ end
 
 -- Redimensionnement (poignee en bas a droite), clampe entre les tailles min/max,
 -- sauvegarde dans Settings pour retrouver la meme taille au prochain chargement.
-local ResizeHandle = create("Frame", {
+local ResizeHandle = Skin.paint(create("Frame", {
 	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -3, 1, -3),
-	Size = UDim2.new(0, 14, 0, 14),
-	BackgroundColor3 = Theme.Stroke,
+	Position = UDim2.new(1, -4, 1, -4),
+	Size = UDim2.new(0, 10, 0, 10),
 	BackgroundTransparency = 0.4,
 	Active = true,
-	ZIndex = 10, -- cree avant Sidebar/PagesHolder : sans ca, ces derniers (meme ZIndex par defaut) le recouvriraient
-}, Main)
-corner(ResizeHandle, 3)
+	ZIndex = 10, -- cree avant TabStrip/PagesHolder : sans ca, ces derniers (meme ZIndex par defaut) le recouvriraient
+}, Main), { BackgroundColor3 = "StrokeStrong" })
+corner(ResizeHandle, 2)
 ResizeHandle.MouseEnter:Connect(function() tween(ResizeHandle, { BackgroundTransparency = 0 }, 0.1) end)
 ResizeHandle.MouseLeave:Connect(function() tween(ResizeHandle, { BackgroundTransparency = 0.4 }, 0.1) end)
 
@@ -2111,96 +2255,203 @@ do
 	end)
 end
 
-local SIDEBAR_WIDTH = 150
+-- Bande d'onglets horizontale (remplace l'ancienne colonne laterale de 150 px,
+-- dont la largeur revient maintenant au contenu). L'onglet actif est marque par
+-- un trait de 2 px sous le libelle, pas par un fond : moins de bruit visuel a
+-- six onglets cote a cote.
+local TabStrip = Skin.paint(create("Frame", {
+	Position = UDim2.new(0, 0, 0, MenuChrome.TopBar),
+	Size = UDim2.new(1, 0, 0, MenuChrome.Tabs),
+}, Main), { BackgroundColor3 = "Panel" })
+create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, TabStrip)
+create("UIPadding", { PaddingLeft = UDim.new(0, 8) }, TabStrip)
 
-local Sidebar = create("Frame", {
-	Position = UDim2.new(0, 0, 0, TOPBAR_HEIGHT),
-	Size = UDim2.new(0, SIDEBAR_WIDTH, 1, -TOPBAR_HEIGHT),
-	BackgroundColor3 = Theme.Panel,
-}, Main)
-create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, Sidebar)
-create("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, Sidebar)
+-- Filet sous la bande d'onglets, pose dans Main et PAS dans TabStrip : ce
+-- dernier a un UIListLayout, qui rangerait le filet comme un onglet de plus et
+-- casserait la rangee.
+Skin.paint(create("Frame", {
+	Position = UDim2.new(0, 0, 0, MenuChrome.TopBar + MenuChrome.Tabs - 1),
+	Size = UDim2.new(1, 0, 0, 1),
+	BorderSizePixel = 0,
+	ZIndex = 2,
+}, Main), { BackgroundColor3 = "Stroke" })
 
+-- Barre d'etat : ce qu'on veut voir sans ouvrir de page (boss suivi et ses PV,
+-- liaison a l'overlay Python, config chargee, touche du menu). Remplie par
+-- MenuChrome.setStatus, appelee depuis Auto Boss et le chargement de config.
+local StatusBar = Skin.paint(create("Frame", {
+	Position = UDim2.new(0, 0, 1, -MenuChrome.Status),
+	Size = UDim2.new(1, 0, 0, MenuChrome.Status),
+}, Main), { BackgroundColor3 = "Panel" })
+Skin.paint(create("Frame", {
+	Size = UDim2.new(1, 0, 0, 1),
+	BorderSizePixel = 0,
+}, StatusBar), { BackgroundColor3 = "Stroke" })
+
+MenuChrome.StatusLeft = Skin.paint(create("TextLabel", {
+	Position = UDim2.new(0, 10, 0, 0),
+	Size = UDim2.new(0.6, -10, 1, 0),
+	BackgroundTransparency = 1,
+	Text = "BOSS --",
+	Font = Enum.Font.Code,
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, StatusBar), { TextColor3 = "SubText" })
+
+-- Decalee de 20 px de plus vers la gauche que la moitie gauche : la poignee de
+-- redimensionnement occupe le coin en bas a droite, juste au-dessus.
+MenuChrome.StatusRight = Skin.paint(create("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -22, 0, 0),
+	Size = UDim2.new(0.4, -22, 1, 0),
+	BackgroundTransparency = 1,
+	Text = "",
+	Font = Enum.Font.Code,
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Right,
+}, StatusBar), { TextColor3 = "SubTextDim" })
+
+-- boss/hp peuvent etre nil (aucun boss suivi) : la moitie gauche retombe alors
+-- sur "BOSS --". La moitie droite (config + touche menu) ne bouge qu'au
+-- chargement d'une config ou au rebind, donc elle est reconstruite ici a chaque
+-- appel plutot que d'etre pilotee separement.
+function MenuChrome.setStatus(boss, hp, maxHp)
+	if boss and hp and maxHp then
+		MenuChrome.StatusLeft.Text = string.format("BOSS %s  %d/%d", string.upper(boss), hp, maxHp)
+	elseif boss then
+		MenuChrome.StatusLeft.Text = "BOSS " .. string.upper(boss)
+	else
+		MenuChrome.StatusLeft.Text = "BOSS --"
+	end
+end
+
+function MenuChrome.refreshRight()
+	MenuChrome.StatusRight.Text = string.format(
+		"CONFIG %s   MENU %s",
+		Meta.defaultConfig or "aucune",
+		MENU_TOGGLE_KEY and MENU_TOGGLE_KEY.Name or "--"
+	)
+end
+
+-- Pas de ClipsDescendants ici : les pages sont des ScrollingFrame, qui
+-- decoupent deja leur propre contenu. En ajouter un a ce niveau tronquait les
+-- listes de selecteurs ouvertes pres du bas de page (voir buildDropList, dont
+-- le panneau est desormais parente a Main pour cette raison).
 local PagesHolder = create("Frame", {
-	Position = UDim2.new(0, SIDEBAR_WIDTH, 0, TOPBAR_HEIGHT),
-	Size = UDim2.new(1, -SIDEBAR_WIDTH, 1, -TOPBAR_HEIGHT),
+	Position = UDim2.new(0, 0, 0, MenuChrome.TopBar + MenuChrome.Tabs),
+	Size = UDim2.new(1, 0, 1, -(MenuChrome.TopBar + MenuChrome.Tabs + MenuChrome.Status)),
 	BackgroundTransparency = 1,
 }, Main)
 
 local pages, sidebarButtons, currentPage = {}, {}, nil
 
 local function selectPage(name)
+	-- Les panneaux de selecteurs flottent dans PagesHolder, pas dans leur page :
+	-- un panneau laisse ouvert resterait visible par-dessus le nouvel onglet.
+	if MenuChrome.closeDrops then MenuChrome.closeDrops() end
+
 	if currentPage then
 		local prev = sidebarButtons[currentPage]
-		prev.Button.BackgroundColor3 = Theme.Element
 		prev.Label.TextColor3 = Theme.SubText
+		prev.Underline.BackgroundTransparency = 1
 		pages[currentPage].Visible = false
 	end
 
 	local current = sidebarButtons[name]
 	pages[name].Visible = true
-	current.Button.BackgroundColor3 = Theme.ElementHover
-	current.Label.TextColor3 = current.AccentColor
+	current.Label.TextColor3 = Theme.Accent
+	current.Underline.BackgroundColor3 = Theme.Accent
+	current.Underline.BackgroundTransparency = 0
 	currentPage = name
+
+	-- La page vient de devenir visible : au prochain pas de rendu, Roblox aura
+	-- calcule la hauteur de ses cards et MenuChrome.balance pourra les repartir
+	-- entre les deux colonnes (voir sa note). Ne fait rien aux appels suivants.
+	if MenuChrome.balance then
+		task.defer(MenuChrome.balance, pages[name])
+	end
+	-- La recherche est globale au menu mais s'applique page par page : en
+	-- changeant d'onglet, on rejoue le filtre sur la nouvelle page (sinon on
+	-- arrive sur une page complete alors que le champ est encore rempli).
+	if MenuChrome.applyFilter then MenuChrome.applyFilter() end
 end
 
--- Chaque categorie a sa propre barre d'accent (pas juste celle qui est
--- selectionnee) : plus besoin d'un indicateur qui glisse dans un calque a
--- part, donc plus de risque de conflit avec le UIListLayout de Sidebar.
+-- accentColor n'est plus utilise (une couleur par categorie faisait six accents
+-- concurrents dans une bande horizontale) : l'onglet actif prend simplement
+-- l'accent du theme. Le parametre reste accepte pour ne pas avoir a toucher les
+-- six appels createCategory plus bas.
 local function createCategory(name, accentColor)
+	-- Largeur estimee d'apres le nombre de caracteres (Gotham Medium 14 fait
+	-- ~8 px/caractere) : les six onglets doivent tenir cote a cote meme a la
+	-- largeur MINIMALE de fenetre (420), sinon les derniers sont coupes.
+	-- Total a 8/caractere + 18 de marge : ~388 px, plus les 8 px de retrait a
+	-- gauche - ca passe tout juste, ne pas augmenter sans relever WINDOW_MIN_WIDTH.
 	local Button = create("TextButton", {
-		Size = UDim2.new(1, 0, 0, 52),
-		BackgroundColor3 = Theme.Element,
+		Size = UDim2.new(0, 8 * #name + 18, 1, 0),
+		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
-	}, Sidebar)
-	corner(Button, 8)
+	}, TabStrip)
 
-	local AccentBar = create("Frame", {
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 6, 0.5, 0),
-		Size = UDim2.new(0, 4, 1, -16),
-		BackgroundColor3 = accentColor or Theme.Accent,
-	}, Button)
-	corner(AccentBar, 2)
-
-	local Label = create("TextLabel", {
-		Position = UDim2.new(0, 20, 0, 0),
-		Size = UDim2.new(1, -26, 1, 0),
+	local Label = Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		Text = name,
-		Font = Enum.Font.GothamBold,
+		Font = Enum.Font.GothamMedium,
 		TextSize = 15,
-		TextColor3 = Theme.SubText,
-		TextXAlignment = Enum.TextXAlignment.Left,
+	}, Button), { TextColor3 = "SubText" })
+
+	local Underline = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, 0),
+		Size = UDim2.new(1, -10, 0, 2),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ZIndex = 3,
 	}, Button)
 
 	Button.MouseButton1Click:Connect(function() selectPage(name) end)
 	Button.MouseEnter:Connect(function()
-		if currentPage ~= name then tween(Button, { BackgroundColor3 = Theme.Stroke }, 0.1) end
+		if currentPage ~= name then tween(Label, { TextColor3 = Theme.Text }, 0.1) end
 	end)
 	Button.MouseLeave:Connect(function()
-		if currentPage ~= name then tween(Button, { BackgroundColor3 = Theme.Element }, 0.1) end
+		if currentPage ~= name then tween(Label, { TextColor3 = Theme.SubText }, 0.1) end
 	end)
 
-	local Page = create("ScrollingFrame", {
+	local Page = Skin.paint(create("ScrollingFrame", {
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 4,
-		ScrollBarImageColor3 = Theme.Accent,
 		CanvasSize = UDim2.new(0, 0, 0, 0),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		Visible = false,
-	}, PagesHolder)
-	create("UIListLayout", { Padding = UDim.new(0, 14), SortOrder = Enum.SortOrder.LayoutOrder }, Page)
+	}, PagesHolder), { ScrollBarImageColor3 = "Stroke" })
+	create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, Page)
 	create("UIPadding", {
-		PaddingTop = UDim.new(0, 14), PaddingLeft = UDim.new(0, 14),
-		PaddingRight = UDim.new(0, 14), PaddingBottom = UDim.new(0, 14),
+		PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
 	}, Page)
 
+	-- Le panneau d'un selecteur ouvert est positionne une fois, en coordonnees
+	-- fenetre : il ne suit pas la page qui defile. Plutot que de le repositionner
+	-- a chaque frame, on referme les listes ouvertes des que la page bouge.
+	Page:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		if MenuChrome.closeDrops then MenuChrome.closeDrops() end
+	end)
+
 	pages[name] = Page
-	sidebarButtons[name] = { Button = Button, Label = Label, AccentColor = accentColor or Theme.Accent }
+	sidebarButtons[name] = { Button = Button, Label = Label, Underline = Underline }
+	-- Le contenu s'organise en blocs a deux colonnes (voir addSection) : on suit
+	-- ici, PAR PAGE, le bloc en cours de remplissage (une section pleine largeur
+	-- le referme). Indexe par l'instance Page parce que c'est ce que addSection
+	-- recoit, pas le nom de la categorie.
+	MenuChrome.bands[Page] = { block = nil }
+	MenuChrome.rows[Page] = {}
+	MenuChrome.blocks[Page] = {} -- blocs a deux colonnes, reequilibres au premier affichage
 	return Page
 end
 
@@ -2208,32 +2459,30 @@ end
 -- texte fixe sous chaque controle (menu trop charge sinon) - repositionne et
 -- rempli au MouseEnter de la cible, cache au MouseLeave. Bascule a gauche du
 -- curseur si l'affichage a droite deborderait de l'ecran.
-local Tooltip = create("Frame", {
+local Tooltip = Skin.paint(create("Frame", {
 	Size = UDim2.new(0, 220, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundColor3 = Theme.Panel,
 	BorderSizePixel = 0,
 	Visible = false,
 	ZIndex = 100,
-}, ScreenGui)
-corner(Tooltip, 8)
-create("UIStroke", { Color = Theme.Stroke, Transparency = 0.2 }, Tooltip)
+}, ScreenGui), { BackgroundColor3 = "Panel" })
+corner(Tooltip, 4)
+Skin.paint(create("UIStroke", { Transparency = 0 }, Tooltip), { Color = "StrokeStrong" })
 create("UIPadding", {
-	PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
-	PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+	PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9),
+	PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7),
 }, Tooltip)
-local TooltipLabel = create("TextLabel", {
+local TooltipLabel = Skin.paint(create("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
 	BackgroundTransparency = 1,
 	Text = "",
 	Font = Enum.Font.Gotham,
 	TextSize = 13,
-	TextColor3 = Theme.SubText,
 	TextWrapped = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	ZIndex = 101,
-}, Tooltip)
+}, Tooltip), { TextColor3 = "SubText" })
 
 -- target : n'importe quel GuiObject (Row/Holder/Button retourne par
 -- addToggleRow/addDropdownRow/addButtonRow/addSliderRow...).
@@ -2252,91 +2501,268 @@ local function attachTooltip(target, text)
 	end)
 end
 
--- Card avec liseré d'accent plein-hauteur a gauche (façon callout/alert box
--- moderne) et titre a l'interieur, a droite du lisere. ClipsDescendants fait
--- epouser le lisere au coin arrondi de la card au lieu de deborder en carre.
-local function addSection(page, title)
-	local Card = create("Frame", {
+-- Card compacte : titre en petites capitales sous un filet, contenu dessous.
+-- Le lisere d'accent plein-hauteur a saute - avec deux cards cote a cote il se
+-- repetait trop et devenait du bruit.
+--
+-- Mise en page en DEUX COLONNES : Roblox n'a pas de grille qui accepte des
+-- enfants a hauteur automatique (UIGridLayout impose une taille de cellule
+-- fixe), donc on empile des "rangees" (bands) dans le UIListLayout vertical de
+-- la page, chacune contenant au plus deux cards a 50 %. Une section large
+-- (wide=true, ex: Auto Boss) ferme la rangee en cours et prend toute la largeur.
+local function addSection(page, title, wide)
+	local band = MenuChrome.bands[page]
+
+	local host
+	if wide or not band then
+		-- Pleine largeur : la card est posee directement dans la page, et le
+		-- bloc a deux colonnes en cours est referme pour que le suivant reparte
+		-- proprement a gauche.
+		if band then band.block = nil end
+		host = page
+	else
+		-- VRAIES colonnes, pas des rangees de deux : chaque colonne est un Frame
+		-- qui empile ses cards verticalement. Avec des rangees, une card haute
+		-- (celles qui contiennent un selecteur) imposait sa hauteur a sa voisine
+		-- et creusait un grand vide sous la plus courte - c'est exactement ce
+		-- qu'on voyait sous "Panic Teleport" a cote d'"Auto Infuse". Ici la card
+		-- suivante de la colonne remonte se coller a la precedente.
+		if not band.block then
+			local Block = create("Frame", {
+				Size = UDim2.new(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+			}, page)
+			create("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Padding = UDim.new(0, 8),
+				VerticalAlignment = Enum.VerticalAlignment.Top,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}, Block)
+
+			band.block = { frame = Block, cols = {}, cards = {} }
+			for i = 1, 2 do
+				band.block.cols[i] = create("Frame", {
+					Size = UDim2.new(0.5, -4, 0, 0),
+					AutomaticSize = Enum.AutomaticSize.Y,
+					BackgroundTransparency = 1,
+					LayoutOrder = i,
+				}, Block)
+				create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, band.block.cols[i])
+			end
+			table.insert(MenuChrome.blocks[page], band.block)
+		end
+		-- Toutes les cards atterrissent d'abord dans la colonne 1 : la
+		-- repartition definitive est faite par MenuChrome.balance au premier
+		-- affichage de la page, quand les hauteurs reelles sont connues.
+		-- Les repartir ici en alternance serait a l'aveugle - c'est ce qui
+		-- laissait une colonne courte a cote d'une card haute (Auto Infuse).
+		host = band.block.cols[1]
+	end
+
+	local Card = Skin.paint(create("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = Theme.Panel,
-		ClipsDescendants = true,
-	}, page)
-	corner(Card, 12)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.15 }, Card)
+	}, host), { BackgroundColor3 = "Panel" })
+	corner(Card, 4)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, Card), { Color = "Stroke" })
 
-	-- Meme style que l'indicateur de la sidebar (barre fine et pleine, sans degrade).
-	local AccentBar = create("Frame", {
-		Position = UDim2.new(0, 4, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		Size = UDim2.new(0, 3, 1, -12),
-		BackgroundColor3 = Theme.Accent,
-		BorderSizePixel = 0,
+	if band and band.block and not wide then
+		table.insert(band.block.cards, Card)
+	end
+
+	local Inner = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
 	}, Card)
-	corner(AccentBar, 2)
+	create("UIListLayout", { Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder }, Inner)
+	create("UIPadding", {
+		PaddingTop = UDim.new(0, 9), PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+	}, Inner)
 
-	create("TextLabel", {
-		Position = UDim2.new(0, 20, 0, 14),
-		Size = UDim2.new(1, -36, 0, 22),
+	-- Casse normale en Gotham, pas des capitales en chasse fixe : "ENVOI AUTO
+	-- INVENTAIRE" faisait log systeme, et les capitales tiennent mal l'accentuation
+	-- francaise. La chasse fixe reste reservee aux valeurs (chiffres, touches).
+	local TitleLabel = Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 19),
 		BackgroundTransparency = 1,
 		Text = title,
 		Font = Enum.Font.GothamBold,
-		TextSize = 17,
-		TextColor3 = Theme.Text,
+		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Left,
-	}, Card)
+		LayoutOrder = 0,
+	}, Inner), { TextColor3 = "SubText" })
+
+	Skin.paint(create("Frame", {
+		Size = UDim2.new(1, 0, 0, 1),
+		BorderSizePixel = 0,
+		LayoutOrder = 1,
+	}, Inner), { BackgroundColor3 = "Stroke" })
 
 	local Content = create("Frame", {
-		Position = UDim2.new(0, 20, 0, 44),
-		Size = UDim2.new(1, -36, 0, 0),
+		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
-	}, Card)
-	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, Content)
-	create("UIPadding", { PaddingBottom = UDim.new(0, 18) }, Content)
+		LayoutOrder = 2,
+	}, Inner)
+	create("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, Content)
+	create("UIPadding", { PaddingTop = UDim.new(0, 6) }, Content)
+
+	-- Enregistre la card pour la recherche : chaque ligne creee dedans se
+	-- declare via MenuChrome.track (appele par les add*Row), et la card se
+	-- masque toute seule quand plus aucune de ses lignes ne correspond.
+	table.insert(MenuChrome.rows[page], { card = Card, title = string.lower(title), rows = {} })
+	MenuChrome.currentSection = MenuChrome.rows[page][#MenuChrome.rows[page]]
 
 	return Content
 end
 
+-- Declare une ligne aupres de la recherche. `text` est le libelle affiche :
+-- c'est lui qu'on compare a la requete. Appele par chaque add*Row juste apres
+-- avoir cree sa ligne, donc rattache a la derniere section ouverte.
+function MenuChrome.track(inst, text)
+	local section = MenuChrome.currentSection
+	if section then
+		table.insert(section.rows, { inst = inst, text = string.lower(text or "") })
+	end
+	return inst
+end
+
+-- Filtre la page visible : masque les lignes qui ne correspondent pas, puis
+-- les cards devenues vides. Un titre de section qui correspond garde toutes
+-- ses lignes (chercher "esp" doit montrer la section ESP entiere).
+function MenuChrome.applyFilter()
+	if not currentPage then return end
+	local query = string.lower(MenuChrome.Search.Text)
+	for _, section in ipairs(MenuChrome.rows[pages[currentPage]] or {}) do
+		local titleHit = query == "" or string.find(section.title, query, 1, true) ~= nil
+		local kept = 0
+		for _, row in ipairs(section.rows) do
+			local hit = titleHit or string.find(row.text, query, 1, true) ~= nil
+			row.inst.Visible = hit
+			if hit then kept = kept + 1 end
+		end
+		-- Recherche vide => on ne masque JAMAIS une card. Sans ce garde-fou,
+		-- une section dont le contenu n'est pas indexe (construit avec create()
+		-- au lieu d'un add*Row, ex: le bouton Decharger) compte zero ligne et
+		-- disparaissait des l'ouverture du menu.
+		section.card.Visible = query == "" or titleHit or kept > 0
+	end
+end
+
+MenuChrome.Search:GetPropertyChangedSignal("Text"):Connect(MenuChrome.applyFilter)
+
+-- Repartit les cards d'une page entre les deux colonnes pour que celles-ci
+-- finissent aussi hautes que possible - sinon une card haute (celle qui contient
+-- un selecteur, ex: Auto Infuse) fait deborder sa colonne et laisse un grand
+-- vide en bas de l'autre.
+--
+-- Appelee au PREMIER affichage de la page, jamais a la construction : c'est le
+-- seul moment ou AbsoluteSize est renseignee, donc le seul moment ou on connait
+-- la hauteur reelle des cards. Toutes les combinaisons sont essayees (2^n) pour
+-- prendre la meilleure : n depasse rarement 8 par page, et l'ordre de
+-- declaration est preserve a l'interieur de chaque colonne (on ne fait que
+-- choisir DANS QUELLE colonne va chaque card, pas les reordonner).
+function MenuChrome.balance(page, attempt)
+	local blocks = MenuChrome.blocks[page]
+	if not blocks then return end
+
+	-- AbsoluteSize n'est renseignee qu'une fois la fenetre reellement affichee
+	-- et la mise en page calculee. Si on tombe trop tot (menu encore masque par
+	-- la splash de chargement), toutes les hauteurs valent 0 : on retente plutot
+	-- que de repartir n'importe comment, et on abandonne au bout de ~2 s.
+	attempt = (attempt or 0) + 1
+	for _, block in ipairs(blocks) do
+		for _, card in ipairs(block.cards) do
+			if card.AbsoluteSize.Y <= 0 then
+				if attempt < 20 then task.delay(0.1, MenuChrome.balance, page, attempt) end
+				return
+			end
+		end
+	end
+
+	MenuChrome.blocks[page] = nil -- mesure valide : une seule fois par page
+
+	for _, block in ipairs(blocks) do
+		local cards = block.cards
+		local count = #cards
+		if count >= 2 and count <= 16 then
+			local heights = {}
+			for i, card in ipairs(cards) do
+				heights[i] = card.AbsoluteSize.Y + 8 -- + l'ecart entre deux cards
+			end
+
+			local bestMask, bestScore = 0, math.huge
+			for mask = 0, (2 ^ count) - 1 do
+				local left, right = 0, 0
+				for i = 1, count do
+					-- bit a 1 => colonne de gauche
+					if math.floor(mask / (2 ^ (i - 1))) % 2 == 1 then
+						left = left + heights[i]
+					else
+						right = right + heights[i]
+					end
+				end
+				local score = math.max(left, right)
+				if score < bestScore then
+					bestMask, bestScore = mask, score
+				end
+			end
+
+			for i, card in ipairs(cards) do
+				local goesLeft = math.floor(bestMask / (2 ^ (i - 1))) % 2 == 1
+				card.Parent = block.cols[goesLeft and 1 or 2]
+				card.LayoutOrder = i -- conserve l'ordre de declaration dans la colonne
+			end
+		end
+	end
+end
+
+-- Hauteur commune a toutes les lignes de reglage : ce qui donne son rythme
+-- vertical a la page. 32 px au lieu de 38 - assez pour respirer avec du texte
+-- a 14, tout en restant plus dense qu'avant.
+local ROW_H = 34
+
 local function addToggleRow(content, text, default, onChange)
 	local state = default or false
 
-	local Row = create("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1 }, content)
-	local Label = create("TextLabel", {
-		Size = UDim2.new(1, -66, 1, 0),
+	local Row = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, ROW_H), BackgroundTransparency = 1 }, content), text)
+	local Label = Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, -46, 1, 0),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
-		TextSize = 16,
-		TextColor3 = Theme.Text,
+		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
-	}, Row)
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, Row), { TextColor3 = "Text" })
 
-	local ON_POSITION, OFF_POSITION = UDim2.new(1, -25, 0.5, -11), UDim2.new(0, 3, 0.5, -11)
+	local ON_POSITION, OFF_POSITION = UDim2.new(1, -17, 0.5, -7), UDim2.new(0, 3, 0.5, -7)
 
-	local Switch = create("Frame", {
+	local Switch = Skin.paint(create("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, 52, 0, 28),
-		BackgroundColor3 = state and Theme.Accent or Theme.Element,
-	}, Row)
-	corner(Switch, 14)
-	-- Fin liseré accent qui s'estompe quand le switch est off, s'illumine quand on.
-	local switchGlow = create("UIStroke", { Color = Theme.Accent, Thickness = 1.5, Transparency = state and 0.5 or 1 }, Switch)
+		Size = UDim2.new(0, 36, 0, 20),
+	}, Row), { BackgroundColor3 = state and "Accent" or "StrokeStrong" })
+	corner(Switch, 10)
 
-	local Knob = create("Frame", {
-		Size = UDim2.new(0, 22, 0, 22),
+	local Knob = Skin.paint(create("Frame", {
+		Size = UDim2.new(0, 14, 0, 14),
 		Position = state and ON_POSITION or OFF_POSITION,
-		BackgroundColor3 = Color3.new(1, 1, 1),
-	}, Switch)
-	corner(Knob, 11)
+	}, Switch), { BackgroundColor3 = state and "OnAccent" or "SubText" })
+	corner(Knob, 7)
 
 	local Click = create("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "" }, Switch)
 
 	local function set(newState)
 		state = newState
-		tween(Switch, { BackgroundColor3 = state and Theme.Accent or Theme.Element }, 0.15)
-		tween(switchGlow, { Transparency = state and 0.5 or 1 }, 0.15)
+		-- Reecrit l'entree de registre plutot que la couleur seule : sans ca un
+		-- changement de theme repeindrait le switch avec le jeton d'origine
+		-- (celui capture a la creation) et perdrait l'etat courant.
+		Skin.paint(Switch, { BackgroundColor3 = state and "Accent" or "StrokeStrong" })
+		Skin.paint(Knob, { BackgroundColor3 = state and "OnAccent" or "SubText" })
 		tweenStyled(Knob, { Position = state and ON_POSITION or OFF_POSITION }, 0.2)
 		if onChange then onChange(state) end
 	end
@@ -2348,128 +2774,279 @@ local function addToggleRow(content, text, default, onChange)
 	return { Set = set, Get = function() return state end, Row = Row, Label = Label }
 end
 
-local function addDropdownRow(content, text, options, default, onChange)
-	local selected = default or options[1]
-	local HEADER_HEIGHT, SEARCH_HEIGHT, OPTION_HEIGHT = 40, 36, 34
+-- Metriques communes aux deux selecteurs.
+--
+-- La liste ne se deplie PAS en place : elle flotte au-dessus du contenu (voir
+-- buildDropList). En place, elle faisait grandir sa card, donc sa colonne, donc
+-- creusait un grand vide en bas de l'autre colonne des qu'on ouvrait un
+-- selecteur - c'est ce qu'on voyait avec "Gemmes" ouvert a cote d'une colonne
+-- gauche courte. En flottant, ouvrir un selecteur ne bouge plus rien.
+--
+-- DROP_H vaut ROW_H : un selecteur occupe exactement la meme hauteur qu'un
+-- toggle ou un slider, sinon il casse le rythme vertical de la card.
+-- DROP_MAX = 9 : les deux listes a cocher (Boss 8, Gemmes 9) tiennent alors en
+-- entier sans avoir a defiler, ce qui est justement le cas ou on veut tout voir.
+local DROP_H, OPT_H, DROP_MAX = ROW_H, 29, 9 -- DROP_MAX : options visibles avant defilement
+local DROP_BOX = 160 -- largeur de la boite de valeur, a droite
+local DROP_SEARCH_FROM = 8 -- a partir de combien d'options on ajoute une recherche
+local DROP_SEARCH_H = 28
 
+-- En-tete commun, construit comme les autres lignes : libelle nu a gauche
+-- (meme couleur, meme taille qu'un toggle), et une boite compacte a droite
+-- avec la valeur et le chevron. Avant, tout l'en-tete etait une grosse boite
+-- pleine largeur : le selecteur ressortait comme un corps etranger au milieu
+-- de lignes nues. Renvoie Holder, bouton, label de valeur et chevron.
+local function buildDropHead(content, text, valueText)
 	local Holder = create("Frame", {
-		Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
-		BackgroundColor3 = Theme.Element,
-		ClipsDescendants = true,
+		Size = UDim2.new(1, 0, 0, DROP_H),
+		BackgroundTransparency = 1,
 	}, content)
-	corner(Holder, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, Holder)
 
 	local MainButton = create("TextButton", {
-		Size = UDim2.new(1, -30, 0, HEADER_HEIGHT),
+		Size = UDim2.new(1, 0, 0, DROP_H),
 		BackgroundTransparency = 1,
-		Text = text .. ": " .. tostring(selected),
-		Font = Enum.Font.GothamMedium,
-		TextSize = 16,
-		TextColor3 = Theme.Text,
+		Text = "",
 		AutoButtonColor = false,
 	}, Holder)
 
-	local Chevron = create("TextLabel", {
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, -(DROP_BOX + 10), 1, 0),
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, MainButton), { TextColor3 = "Text" })
+
+	local Box = Skin.paint(create("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -14, 0.5, 0),
-		Size = UDim2.new(0, 18, 0, 18),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.new(0, DROP_BOX, 0, 26),
+	}, MainButton), { BackgroundColor3 = "Element" })
+	corner(Box, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, Box), { Color = "StrokeStrong" })
+
+	local ValueLabel = Skin.paint(create("TextLabel", {
+		Position = UDim2.new(0, 8, 0, 0),
+		Size = UDim2.new(1, -26, 1, 0),
+		BackgroundTransparency = 1,
+		Text = valueText,
+		Font = Enum.Font.Code,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, Box), { TextColor3 = "Text" })
+
+	local Chevron = Skin.paint(create("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -6, 0.5, 0),
+		Size = UDim2.new(0, 12, 0, 12),
 		BackgroundTransparency = 1,
 		Text = "▾",
 		Font = Enum.Font.GothamBold,
-		TextSize = 15,
-		TextColor3 = Theme.SubText,
-	}, Holder)
+		TextSize = 12,
+	}, Box), { TextColor3 = "SubText" })
 
-	-- Barre de recherche : fond Panel (plus sombre que le Holder en Element,
-	-- effet "en creux") pour bien la distinguer. Filtre les options en direct.
-	local SearchBox = create("TextBox", {
-		Position = UDim2.new(0, 8, 0, HEADER_HEIGHT + 4),
-		Size = UDim2.new(1, -16, 0, SEARCH_HEIGHT - 8),
-		BackgroundColor3 = Theme.Panel,
-		Text = "",
-		PlaceholderText = "Rechercher...",
-		PlaceholderColor3 = Theme.SubText,
-		TextColor3 = Theme.Text,
-		Font = Enum.Font.GothamMedium,
-		TextSize = 13,
-		ClearTextOnFocus = false,
-	}, Holder)
-	corner(SearchBox, 6)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.3 }, SearchBox)
-	create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, SearchBox)
+	MainButton.MouseEnter:Connect(function() tween(Box, { BackgroundColor3 = Theme.ElementHover }, 0.1) end)
+	MainButton.MouseLeave:Connect(function() tween(Box, { BackgroundColor3 = Theme.Element }, 0.1) end)
 
-	local List = create("Frame", {
-		Position = UDim2.new(0, 0, 0, HEADER_HEIGHT + SEARCH_HEIGHT),
-		Size = UDim2.new(1, 0, 0, #options * OPTION_HEIGHT),
+	return Holder, MainButton, ValueLabel, Chevron
+end
+
+-- Option de liste, commune aux deux selecteurs. `label` est deja mis en forme
+-- par l'appelant (le multi-select y prefixe sa case "[x] " / "[  ] ").
+local function buildDropOption(list, label)
+	-- ZIndex explicite (et pas la valeur par defaut) : le ScreenGui est cree par
+	-- Instance.new, donc son ZIndexBehavior vaut Global - le rendu suit le
+	-- numero de ZIndex a plat sur tout l'arbre, PAS la hierarchie. Sans ca, le
+	-- fond du panneau (12) recouvrait ses propres options (1) : la liste
+	-- s'ouvrait et restait cliquable, mais paraissait vide.
+	local OptButton = Skin.paint(create("TextButton", {
+		Size = UDim2.new(1, 0, 0, OPT_H),
 		BackgroundTransparency = 1,
-	}, Holder)
-	create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, List)
+		Text = label,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 14,
+	}, list), { BackgroundColor3 = "ElementHover", TextColor3 = "SubText" })
+	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, OptButton)
+	OptButton.MouseEnter:Connect(function() OptButton.BackgroundTransparency = 0 end)
+	OptButton.MouseLeave:Connect(function() OptButton.BackgroundTransparency = 1 end)
+	return OptButton
+end
 
-	local optionButtons = {}
-	local open = false
+-- Panneau de liste FLOTTANT, parente a Main (la fenetre) et PAS a la card ni a
+-- PagesHolder : il passe ainsi par-dessus le contenu au lieu de le pousser, et
+-- surtout il echappe au ClipsDescendants de la zone de contenu. Parente a
+-- PagesHolder, une liste ouverte pres du bas de page etait tout simplement
+-- coupee - on ne voyait que les deux premieres options du selecteur "Boss".
+-- Main n'a pas de ClipsDescendants : le panneau peut donc deborder de la
+-- fenetre si besoin, ce qui vaut mieux que d'etre tronque.
+--
+-- Position calculee a la main a l'ouverture, en coordonnees Main.
+--
+-- ZIndex : le ScreenGui vient d'Instance.new, donc son ZIndexBehavior vaut
+-- Global - tout est dessine selon le numero de ZIndex a plat sur l'arbre, sans
+-- tenir compte de la hierarchie. Un enfant ne passe donc PAS automatiquement
+-- au-dessus de son parent : il faut etager explicitement (panneau 12, barre de
+-- recherche et liste 13, options 14). Le contenu du menu plafonne a 10
+-- (poignee de redimensionnement) et les voiles de chargement commencent a 20,
+-- d'ou cette plage.
+-- Renvoie { Panel, Scroll, Search, Open, Close, IsOpen }.
+--
+-- Une barre de recherche apparait a partir de DROP_SEARCH_FROM options : c'est
+-- indispensable sur les listes longues (les ~30 objets achetables), ou faire
+-- defiler a l'aveugle est penible.
+local function buildDropList(holder, optionCount)
+	local withSearch = optionCount >= DROP_SEARCH_FROM
+	local searchOffset = withSearch and DROP_SEARCH_H or 0
 
-	local function visibleOptionCount()
-		local count = 0
-		for _, btn in ipairs(optionButtons) do
-			if btn.Visible then count = count + 1 end
+	local Panel = Skin.paint(create("Frame", {
+		Visible = false,
+		ZIndex = 12,
+	}, Main), { BackgroundColor3 = "Element" })
+	corner(Panel, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, Panel), { Color = "StrokeStrong" })
+
+	local Search
+	if withSearch then
+		Search = Skin.paint(create("TextBox", {
+			Position = UDim2.new(0, 1, 0, 1),
+			Size = UDim2.new(1, -2, 0, DROP_SEARCH_H - 2),
+			BackgroundTransparency = 1,
+			Text = "",
+			PlaceholderText = "Rechercher...",
+			Font = Enum.Font.GothamMedium,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ClearTextOnFocus = false,
+			ZIndex = 13,
+		}, Panel), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, Search)
+		Skin.paint(create("Frame", {
+			Position = UDim2.new(0, 0, 0, DROP_SEARCH_H - 1),
+			Size = UDim2.new(1, 0, 0, 1),
+			BorderSizePixel = 0,
+			ZIndex = 13,
+		}, Panel), { BackgroundColor3 = "StrokeStrong" })
+	end
+
+	local Scroll = Skin.paint(create("ScrollingFrame", {
+		Position = UDim2.new(0, 0, 0, searchOffset),
+		Size = UDim2.new(1, 0, 1, -searchOffset),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ZIndex = 13,
+	}, Panel), { ScrollBarImageColor3 = "StrokeStrong" })
+	create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, Scroll)
+
+	local api = { Panel = Panel, Scroll = Scroll, Search = Search }
+
+	function api.Close()
+		Panel.Visible = false
+		if Search then Search.Text = "" end
+	end
+
+	-- visibleCount : nombre d'options non filtrees, pour que le panneau ne garde
+	-- pas une hauteur fixe quand la recherche en masque la moitie.
+	function api.Open(visibleCount)
+		local rows = math.clamp(visibleCount or optionCount, 1, DROP_MAX)
+		local height = searchOffset + rows * OPT_H
+		local origin = Main.AbsolutePosition
+		local anchor = holder.AbsolutePosition
+
+		-- Sous l'en-tete par defaut ; au-dessus si la liste depasserait le bas de
+		-- l'ecran (typiquement un selecteur en bas d'une page bien remplie).
+		local top = anchor.Y + DROP_H
+		if top + height > ScreenGui.AbsoluteSize.Y - 8 then
+			top = anchor.Y - height
 		end
-		return count
+
+		Panel.Position = UDim2.fromOffset(anchor.X - origin.X, top - origin.Y)
+		Panel.Size = UDim2.fromOffset(holder.AbsoluteSize.X, height)
+		Panel.Visible = true
 	end
 
-	local function resizeOpen()
-		tween(Holder, { Size = UDim2.new(1, 0, 0, HEADER_HEIGHT + SEARCH_HEIGHT + visibleOptionCount() * OPTION_HEIGHT) }, 0.12)
-	end
+	function api.IsOpen() return Panel.Visible end
 
-	local function applyFilter()
-		local query = SearchBox.Text:lower()
-		for _, btn in ipairs(optionButtons) do
-			btn.Visible = query == "" or btn.Text:lower():find(query, 1, true) ~= nil
-		end
-		if open then resizeOpen() end
+	table.insert(MenuChrome.drops, api)
+	return api
+end
+
+-- Referme tous les selecteurs ouverts. Appelee au changement d'onglet et avant
+-- d'en ouvrir un autre : comme les panneaux flottent hors de leur card, un
+-- panneau oublie resterait visible par-dessus une page qui a change.
+function MenuChrome.closeDrops(except)
+	for _, api in ipairs(MenuChrome.drops) do
+		if api ~= except then api.Close() end
 	end
+end
+
+local function addDropdownRow(content, text, options, default, onChange)
+	local selected = default or options[1]
+
+	local Holder, MainButton, ValueLabel, Chevron = buildDropHead(content, text, tostring(selected))
+	MenuChrome.track(Holder, text)
+
+	local drop = buildDropList(Holder, #options)
+	local buttons = {}
 
 	local function close()
-		open = false
-		tween(Holder, { Size = UDim2.new(1, 0, 0, HEADER_HEIGHT) })
+		drop.Close()
 		tween(Chevron, { Rotation = 0 }, 0.15)
-		SearchBox.Text = ""
-		applyFilter()
+	end
+
+	-- Compte les options encore visibles apres filtrage, pour redimensionner le
+	-- panneau au plus juste.
+	local function visibleCount()
+		local n = 0
+		for _, btn in ipairs(buttons) do
+			if btn.Visible then n = n + 1 end
+		end
+		return n
+	end
+
+	local function applyDropFilter()
+		local query = drop.Search and string.lower(drop.Search.Text) or ""
+		for _, btn in ipairs(buttons) do
+			btn.Visible = query == "" or string.find(string.lower(btn.Text), query, 1, true) ~= nil
+		end
+		if drop.IsOpen() then drop.Open(visibleCount()) end
 	end
 
 	for _, option in ipairs(options) do
-		local OptButton = create("TextButton", {
-			Size = UDim2.new(1, 0, 0, OPTION_HEIGHT),
-			BackgroundColor3 = Theme.Stroke,
-			BackgroundTransparency = 1,
-			Text = tostring(option),
-			Font = Enum.Font.GothamMedium,
-			TextSize = 14,
-			TextColor3 = Theme.SubText,
-		}, List)
-		table.insert(optionButtons, OptButton)
-		OptButton.MouseEnter:Connect(function() tween(OptButton, { BackgroundTransparency = 0.4 }, 0.1) end)
-		OptButton.MouseLeave:Connect(function() tween(OptButton, { BackgroundTransparency = 1 }, 0.1) end)
+		local OptButton = buildDropOption(drop.Scroll, tostring(option))
+		table.insert(buttons, OptButton)
+		if option == selected then Skin.paint(OptButton, { TextColor3 = "Accent" }) end
 		OptButton.MouseButton1Click:Connect(function()
 			selected = option
-			MainButton.Text = text .. ": " .. tostring(selected)
+			ValueLabel.Text = tostring(selected)
+			for _, other in ipairs(buttons) do
+				Skin.paint(other, { TextColor3 = other == OptButton and "Accent" or "SubText" })
+			end
 			close()
 			if onChange then onChange(selected) end
 		end)
 	end
 
-	SearchBox:GetPropertyChangedSignal("Text"):Connect(applyFilter)
-
-	MainButton.MouseEnter:Connect(function() tween(Holder, { BackgroundColor3 = Theme.Stroke }, 0.1) end)
-	MainButton.MouseLeave:Connect(function() tween(Holder, { BackgroundColor3 = Theme.Element }, 0.1) end)
+	if drop.Search then
+		drop.Search:GetPropertyChangedSignal("Text"):Connect(applyDropFilter)
+	end
 
 	MainButton.MouseButton1Click:Connect(function()
-		open = not open
-		if open then
-			tween(Chevron, { Rotation = 180 }, 0.15)
-			resizeOpen()
-		else
+		if drop.IsOpen() then
 			close()
+		else
+			MenuChrome.closeDrops(drop)
+			applyDropFilter()
+			drop.Open(visibleCount())
+			tween(Chevron, { Rotation = 180 }, 0.15)
 		end
 	end)
 
@@ -2477,7 +3054,7 @@ local function addDropdownRow(content, text, options, default, onChange)
 	-- chargement de config) ; declenche quand meme onChange pour appliquer l'effet.
 	local function set(newValue)
 		selected = newValue
-		MainButton.Text = text .. ": " .. tostring(selected)
+		ValueLabel.Text = tostring(selected)
 		if onChange then onChange(selected) end
 	end
 
@@ -2490,8 +3067,6 @@ end
 -- (et servant d'etat initial) ; onChange(option, newState) est appele a
 -- chaque clic sur une option.
 local function addMultiSelectDropdownRow(content, text, options, selectedSet, onChange)
-	local HEADER_HEIGHT, OPTION_HEIGHT = 40, 34
-
 	local function countSelected()
 		local n = 0
 		for _, v in pairs(selectedSet) do
@@ -2500,84 +3075,67 @@ local function addMultiSelectDropdownRow(content, text, options, selectedSet, on
 		return n
 	end
 
-	local Holder = create("Frame", {
-		Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
-		BackgroundColor3 = Theme.Element,
-		ClipsDescendants = true,
-	}, content)
-	corner(Holder, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, Holder)
+	-- L'en-tete compte les actifs ("6 / 8") au lieu de nommer une valeur : c'est
+	-- l'information utile quand plusieurs sont coches en meme temps.
+	local function headText() return countSelected() .. " / " .. #options end
 
-	local MainButton = create("TextButton", {
-		Size = UDim2.new(1, -30, 0, HEADER_HEIGHT),
-		BackgroundTransparency = 1,
-		Text = text .. " (" .. countSelected() .. ")",
-		Font = Enum.Font.GothamMedium,
-		TextSize = 16,
-		TextColor3 = Theme.Text,
-		AutoButtonColor = false,
-	}, Holder)
+	local Holder, MainButton, ValueLabel, Chevron = buildDropHead(content, text, headText())
+	MenuChrome.track(Holder, text)
 
-	local Chevron = create("TextLabel", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -14, 0.5, 0),
-		Size = UDim2.new(0, 18, 0, 18),
-		BackgroundTransparency = 1,
-		Text = "▾",
-		Font = Enum.Font.GothamBold,
-		TextSize = 15,
-		TextColor3 = Theme.SubText,
-	}, Holder)
-
-	local List = create("Frame", {
-		Position = UDim2.new(0, 0, 0, HEADER_HEIGHT),
-		Size = UDim2.new(1, 0, 0, #options * OPTION_HEIGHT),
-		BackgroundTransparency = 1,
-	}, Holder)
-	create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, List)
-
-	local open = false
+	local drop = buildDropList(Holder, #options)
+	local buttons = {}
 
 	local function optionText(option)
-		return (selectedSet[option] and "[x] " or "[ ] ") .. tostring(option)
+		return (selectedSet[option] and "[x]  " or "[  ]  ") .. tostring(option)
+	end
+
+	local function visibleCount()
+		local n = 0
+		for _, btn in ipairs(buttons) do
+			if btn.Visible then n = n + 1 end
+		end
+		return n
+	end
+
+	local function applyDropFilter()
+		local query = drop.Search and string.lower(drop.Search.Text) or ""
+		for _, btn in ipairs(buttons) do
+			btn.Visible = query == "" or string.find(string.lower(btn.Text), query, 1, true) ~= nil
+		end
+		if drop.IsOpen() then drop.Open(visibleCount()) end
 	end
 
 	for _, option in ipairs(options) do
-		local OptButton = create("TextButton", {
-			Size = UDim2.new(1, 0, 0, OPTION_HEIGHT),
-			BackgroundColor3 = Theme.Stroke,
-			BackgroundTransparency = 1,
-			Text = optionText(option),
-			Font = Enum.Font.GothamMedium,
-			TextSize = 14,
-			TextColor3 = selectedSet[option] and Theme.Accent or Theme.SubText,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}, List)
-		create("UIPadding", { PaddingLeft = UDim.new(0, 10) }, OptButton)
+		local OptButton = buildDropOption(drop.Scroll, optionText(option))
+		OptButton.Font = Enum.Font.Code
+		OptButton.TextSize = 13
+		table.insert(buttons, OptButton)
+		if selectedSet[option] then Skin.paint(OptButton, { TextColor3 = "Accent" }) end
 
-		OptButton.MouseEnter:Connect(function() tween(OptButton, { BackgroundTransparency = 0.4 }, 0.1) end)
-		OptButton.MouseLeave:Connect(function() tween(OptButton, { BackgroundTransparency = 1 }, 0.1) end)
+		-- Ne se ferme PAS au clic : on coche plusieurs entrees d'affilee.
 		OptButton.MouseButton1Click:Connect(function()
 			local newState = not selectedSet[option]
 			selectedSet[option] = newState
 			OptButton.Text = optionText(option)
-			OptButton.TextColor3 = newState and Theme.Accent or Theme.SubText
-			MainButton.Text = text .. " (" .. countSelected() .. ")"
+			Skin.paint(OptButton, { TextColor3 = newState and "Accent" or "SubText" })
+			ValueLabel.Text = headText()
 			if onChange then onChange(option, newState) end
 		end)
 	end
 
-	MainButton.MouseEnter:Connect(function() tween(Holder, { BackgroundColor3 = Theme.Stroke }, 0.1) end)
-	MainButton.MouseLeave:Connect(function() tween(Holder, { BackgroundColor3 = Theme.Element }, 0.1) end)
+	if drop.Search then
+		drop.Search:GetPropertyChangedSignal("Text"):Connect(applyDropFilter)
+	end
 
 	MainButton.MouseButton1Click:Connect(function()
-		open = not open
-		if open then
-			tween(Chevron, { Rotation = 180 }, 0.15)
-			tween(Holder, { Size = UDim2.new(1, 0, 0, HEADER_HEIGHT + #options * OPTION_HEIGHT) }, 0.12)
-		else
+		if drop.IsOpen() then
+			drop.Close()
 			tween(Chevron, { Rotation = 0 }, 0.15)
-			tween(Holder, { Size = UDim2.new(1, 0, 0, HEADER_HEIGHT) })
+		else
+			MenuChrome.closeDrops(drop)
+			applyDropFilter()
+			drop.Open(visibleCount())
+			tween(Chevron, { Rotation = 180 }, 0.15)
 		end
 	end)
 
@@ -2588,59 +3146,58 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 	step = step or 1
 	local value = default or min
 
-	local Holder = create("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1 }, content)
-	create("TextLabel", {
-		Size = UDim2.new(1, -70, 0, 22),
+	-- Tout tient sur UNE ligne (libelle / valeur / piste) au lieu des deux
+	-- d'avant : c'est l'autre moitie du gain de densite.
+	local Holder = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, ROW_H), BackgroundTransparency = 1 }, content), text)
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, -178, 1, 0),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
-		TextSize = 16,
-		TextColor3 = Theme.Text,
+		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
-	}, Holder)
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, Holder), { TextColor3 = "Text" })
 
 	local decimals = step < 1 and math.max(0, -math.floor(math.log10(step) + 0.0001)) or 0
 	local function formatValue(v)
-		if v <= 0 and min <= 0 then return "Illimite" end
+		if v <= 0 and min <= 0 then return "illimite" end
 		return string.format("%." .. decimals .. "f", v)
 	end
 
-	local ValueLabel = create("TextLabel", {
+	-- Chasse fixe : la valeur ne fait pas sauter la piste en changeant de
+	-- largeur quand elle passe de 9 a 10.
+	local ValueLabel = Skin.paint(create("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, 0, 0, 0),
-		Size = UDim2.new(0, 80, 0, 22),
+		Position = UDim2.new(1, -110, 0, 0),
+		Size = UDim2.new(0, 62, 1, 0),
 		BackgroundTransparency = 1,
 		Text = formatValue(value),
-		Font = Enum.Font.GothamBold,
-		TextSize = 16,
-		TextColor3 = Theme.Accent,
+		Font = Enum.Font.Code,
+		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Right,
-	}, Holder)
+	}, Holder), { TextColor3 = "SubText" })
 
-	local Bar = create("Frame", {
-		Position = UDim2.new(0, 0, 0, 36),
-		Size = UDim2.new(1, 0, 0, 8),
-		BackgroundColor3 = Theme.Element,
-	}, Holder)
-	corner(Bar, 4)
+	local Bar = Skin.paint(create("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.new(0, 100, 0, 4),
+	}, Holder), { BackgroundColor3 = "StrokeStrong" })
+	corner(Bar, 2)
 
 	local function pctFor(v) return (v - min) / (max - min) end
 
-	local Fill = create("Frame", { Size = UDim2.new(pctFor(value), 0, 1, 0), BackgroundColor3 = Theme.Accent }, Bar)
-	corner(Fill, 4)
-	gradient(Fill, ColorSequence.new(Theme.Accent, Theme.AccentDim), 0)
+	local Fill = Skin.paint(create("Frame", { Size = UDim2.new(pctFor(value), 0, 1, 0) }, Bar), { BackgroundColor3 = "Accent" })
+	corner(Fill, 2)
 
-	-- Curseur rond par-dessus la barre fine : plus lisible/tactile qu'un simple
-	-- remplissage, et grossit legerement au survol/drag pour le feedback.
-	local Knob = create("Frame", {
+	-- Curseur : un trait vertical fin plutot qu'une pastille ronde - a cette
+	-- taille de piste (3 px) une pastille ferait une grosse bulle posee dessus.
+	local Knob = Skin.paint(create("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(pctFor(value), 0, 0.5, 0),
-		Size = UDim2.new(0, 16, 0, 16),
-		BackgroundColor3 = Color3.new(1, 1, 1),
+		Size = UDim2.new(0, 4, 0, 15),
 		ZIndex = 2,
-	}, Bar)
-	corner(Knob, 8)
-	create("UIStroke", { Color = Theme.Accent, Thickness = 2 }, Knob)
+	}, Bar), { BackgroundColor3 = "Accent" })
 
 	local dragging = false
 
@@ -2656,7 +3213,7 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 	end
 
 	local function setKnobHover(hovering)
-		tweenStyled(Knob, { Size = hovering and UDim2.new(0, 20, 0, 20) or UDim2.new(0, 16, 0, 16) }, 0.15)
+		tweenStyled(Knob, { Size = hovering and UDim2.new(0, 4, 0, 19) or UDim2.new(0, 4, 0, 15) }, 0.15)
 	end
 	Bar.MouseEnter:Connect(function() setKnobHover(true) end)
 	Bar.MouseLeave:Connect(function() if not dragging then setKnobHover(false) end end)
@@ -2695,17 +3252,16 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 end
 
 local function addLabelRow(content, text)
-	return create("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 20),
+	return MenuChrome.track(Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 16),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.Gotham,
-		TextSize = 14,
-		TextColor3 = Theme.SubText,
+		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextWrapped = true,
-	}, content)
+	}, content), { TextColor3 = "SubText" }), text)
 end
 
 -- Comportement de capture partage par addKeybindRow (ligne complete, touche
@@ -2722,18 +3278,23 @@ local function attachKeybindCapture(button, currentKey, onChange, escapeClears)
 	button.Text = labelFor(currentKey)
 
 	button.MouseEnter:Connect(function()
-		if not capturing then tween(button, { BackgroundColor3 = Theme.Stroke }, 0.1) end
+		if not capturing then tween(button, { BackgroundColor3 = Theme.ElementHover }, 0.1) end
 	end)
 	button.MouseLeave:Connect(function()
 		if not capturing then tween(button, { BackgroundColor3 = Theme.Element }, 0.1) end
 	end)
 
+	-- Pendant l'ecoute, le cadre passe en Warn (ambre dans tous les themes) :
+	-- ca dit "le menu attend une touche" sans se confondre avec l'accent, qui
+	-- veut deja dire "actif" partout ailleurs.
 	button.MouseButton1Click:Connect(function()
 		if capturing then return end
 		capturing = true
 		capturingKeybind = true
 		button.Text = "..."
-		tween(button, { BackgroundColor3 = Theme.Accent, TextColor3 = Color3.new(1, 1, 1) }, 0.1)
+		tween(button, { TextColor3 = Theme.Warn }, 0.1)
+		local captureStroke = button:FindFirstChildWhichIsA("UIStroke")
+		if captureStroke then captureStroke.Color = Theme.Warn end
 
 		local connection
 		connection = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -2743,7 +3304,8 @@ local function attachKeybindCapture(button, currentKey, onChange, escapeClears)
 			connection:Disconnect()
 			capturing = false
 			capturingKeybind = false
-			tween(button, { BackgroundColor3 = Theme.Element, TextColor3 = Theme.Accent }, 0.1)
+			tween(button, { BackgroundColor3 = Theme.Element, TextColor3 = Theme.Text }, 0.1)
+			if captureStroke then captureStroke.Color = Theme.StrokeStrong end
 
 			if input.KeyCode == Enum.KeyCode.Escape and not escapeClears then
 				button.Text = labelFor(currentKey)
@@ -2764,29 +3326,27 @@ local function attachKeybindCapture(button, currentKey, onChange, escapeClears)
 end
 
 local function addKeybindRow(content, text, currentKey, onChange, escapeClears)
-	local Row = create("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1 }, content)
-	create("TextLabel", {
-		Size = UDim2.new(1, -122, 1, 0),
+	local Row = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, ROW_H), BackgroundTransparency = 1 }, content), text)
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, -104, 1, 0),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
-		TextSize = 16,
-		TextColor3 = Theme.Text,
+		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
-	}, Row)
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, Row), { TextColor3 = "Text" })
 
-	local KeyButton = create("TextButton", {
+	local KeyButton = Skin.paint(create("TextButton", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, 112, 0, 32),
-		BackgroundColor3 = Theme.Element,
-		Font = Enum.Font.GothamBold,
-		TextSize = 14,
-		TextColor3 = Theme.Accent,
+		Size = UDim2.new(0, 102, 0, 25),
+		Font = Enum.Font.Code,
+		TextSize = 13,
 		AutoButtonColor = false,
-	}, Row)
-	corner(KeyButton, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, KeyButton)
+	}, Row), { BackgroundColor3 = "Element", TextColor3 = "Text" })
+	corner(KeyButton, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, KeyButton), { Color = "StrokeStrong" })
 
 	return attachKeybindCapture(KeyButton, currentKey, onChange, escapeClears or false)
 end
@@ -2849,25 +3409,23 @@ do
 		registerEntry(id, label, control.Get, function()
 			control.Set(not control.Get())
 		end, function(key, onChange)
-			local SQUARE = 26
-			local GAP = 8
+			local SQUARE = 18
+			local GAP = 6
 
 			control.Label.Position = UDim2.new(0, SQUARE + GAP, 0, 0)
-			control.Label.Size = UDim2.new(1, -66 - SQUARE - GAP, 1, 0)
+			control.Label.Size = UDim2.new(1, -38 - SQUARE - GAP, 1, 0)
 
-			local KeySquare = create("TextButton", {
+			local KeySquare = Skin.paint(create("TextButton", {
 				Position = UDim2.new(0, 0, 0.5, -SQUARE / 2),
 				Size = UDim2.new(0, SQUARE, 0, SQUARE),
-				BackgroundColor3 = Theme.Element,
-				Font = Enum.Font.GothamBold,
-				TextSize = 11,
+				Font = Enum.Font.Code,
+				TextSize = 10,
 				TextScaled = true,
 				TextWrapped = true,
-				TextColor3 = Theme.Accent,
 				AutoButtonColor = false,
-			}, control.Row)
-			corner(KeySquare, 6)
-			create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, KeySquare)
+			}, control.Row), { BackgroundColor3 = "Element", TextColor3 = "SubText" })
+			corner(KeySquare, 3)
+			Skin.paint(create("UIStroke", { Transparency = 0 }, KeySquare), { Color = "StrokeStrong" })
 
 			attachKeybindCapture(KeySquare, key, onChange, true)
 		end)
@@ -2929,23 +3487,22 @@ do
 end
 
 local function addButtonRow(content, text, onClick)
-	local Button = create("TextButton", {
-		Size = UDim2.new(1, 0, 0, 50),
-		BackgroundColor3 = Theme.Element,
+	local Button = Skin.paint(create("TextButton", {
+		Size = UDim2.new(1, 0, 0, 32),
 		Text = text,
 		Font = Enum.Font.GothamBold,
-		TextSize = 18,
-		TextColor3 = Theme.Text,
+		TextSize = 15,
 		AutoButtonColor = false,
-	}, content)
-	corner(Button, 10)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, Button)
+	}, content), { BackgroundColor3 = "Element", TextColor3 = "Text" })
+	corner(Button, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, Button), { Color = "Stroke" })
 	local buttonScale = create("UIScale", { Scale = 1 }, Button) -- petit effet d'appui (scale), independant du pivot du bouton
+	MenuChrome.track(Button, text)
 
 	local hovering = false
 	Button.MouseEnter:Connect(function()
 		hovering = true
-		tween(Button, { BackgroundColor3 = Theme.Stroke }, 0.1)
+		tween(Button, { BackgroundColor3 = Theme.ElementHover }, 0.1)
 	end)
 	Button.MouseLeave:Connect(function()
 		hovering = false
@@ -2953,13 +3510,18 @@ local function addButtonRow(content, text, onClick)
 	end)
 
 	Button.MouseButton1Click:Connect(function()
-		tween(Button, { BackgroundColor3 = Theme.Accent }, 0.1)
-		tween(buttonScale, { Scale = 0.96 }, 0.08)
+		-- Flash a l'accent puis retour : le seul moment ou un bouton se colore.
+		Button.BackgroundColor3 = Theme.Accent
+		Button.TextColor3 = Theme.OnAccent
+		tween(buttonScale, { Scale = 0.97 }, 0.08)
 		task.delay(0.08, function()
 			tween(buttonScale, { Scale = 1 }, 0.12)
 		end)
-		task.delay(0.1, function()
-			tween(Button, { BackgroundColor3 = hovering and Theme.Stroke or Theme.Element }, 0.15)
+		task.delay(0.12, function()
+			tween(Button, {
+				BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element,
+				TextColor3 = Theme.Text,
+			}, 0.15)
 		end)
 		if onClick then onClick() end
 	end)
@@ -3569,7 +4131,10 @@ do
 
 		local GameManager = require(ReplicatedStorage.GameManager)
 
-		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false }
+		-- hudHp/hudHpMax : derniers PV pousses dans le HUD, memorises pour que
+		-- M.setHudState puisse reafficher la meme valeur dans la barre d'etat du
+		-- menu sans que l'appelant ait a les repasser.
+		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
 		local M = {}
 
 		function M.getDataEvent()
@@ -3737,21 +4302,28 @@ do
 		-- HUD (ScreenGui + panneau) affichant l'etat d'Auto Boss en permanence
 		-- pendant qu'il est actif (pas seulement pendant l'attach) - demande
 		-- explicitement plutot qu'un simple label dans le menu (souvent ferme
-		-- pendant le farm). Meme info qu'un exemple de reference fourni par
-		-- l'utilisateur (Current Boss / Stop Reason / Stage) mais habille avec
-		-- notre propre DA (Theme/create/corner, meme carte a lisere d'accent
-		-- que addSection) plutot qu'un copier-coller du style de l'exemple.
+		-- pendant le farm). Memes donnees qu'avant (boss courant, PV, raison
+		-- d'arret, phase) mais rangees autrement : la phase monte en haut a
+		-- droite parce que c'est ce qu'on lit le plus souvent, le nom du boss et
+		-- ses PV tiennent sur une seule ligne, et la barre passe de 22 a 6 px.
+		-- 420x126 au lieu de 420x168 : un quart de hauteur en moins sans rien
+		-- perdre. Le lisere d'accent vertical a saute : la phase coloree en haut
+		-- a droite dit deja ce qu'il disait.
 		-- state.hud est une table de labels - voir M.setHudState plus bas
 		-- pour les mettre a jour ensemble.
+		--
+		-- On stocke des NOMS DE JETONS, pas des Color3 : sinon les couleurs
+		-- seraient figees au chargement du script et ne suivraient pas les
+		-- changements de theme (voir Skin en tete de fichier).
 		local STAGE_COLORS = {
-			Waiting = Theme.SubText,
-			Spawning = Theme.Accent,
-			Attacking = Theme.Accent,
-			Grip = Theme.Accent,
-			Looting = Theme.Success,
-			Paused = Theme.Danger,
-			Resuming = Theme.Danger,
-			Panic = Theme.Danger,
+			Waiting = "SubText",
+			Spawning = "Accent",
+			Attacking = "Accent",
+			Grip = "Accent",
+			Looting = "Success",
+			Paused = "Danger",
+			Resuming = "Danger",
+			Panic = "Danger",
 		}
 
 		function M.ensureHud()
@@ -3762,17 +4334,16 @@ do
 			gui.IgnoreGuiInset = true
 			gui.Parent = PlayerGui
 
-			local root = create("Frame", {
-				Size = UDim2.new(0, 420, 0, 168),
+			local root = Skin.paint(create("Frame", {
+				Size = UDim2.new(0, 420, 0, 126),
 				Position = UDim2.new(0.5, -210, 0, 16),
-				BackgroundColor3 = Theme.Panel,
 				BackgroundTransparency = 0.05,
 				ClipsDescendants = true,
 				Active = true,
 				Visible = false,
-			}, gui)
-			corner(root, 14)
-			create("UIStroke", { Color = Theme.Stroke, Transparency = 0.15 }, root)
+			}, gui), { BackgroundColor3 = "Background" })
+			corner(root, 5)
+			Skin.paint(create("UIStroke", { Transparency = 0 }, root), { Color = "Stroke" })
 
 			-- Draggable partout sur le panneau, meme mecanique que la fenetre
 			-- principale (voir "Drag de la fenetre" plus haut dans le
@@ -3797,108 +4368,107 @@ do
 				end)
 			end
 
-			-- Meme lisere d'accent plein-hauteur que les cards du menu
-			-- (addSection) - signature visuelle commune a toute l'UI.
-			local accentBar = create("Frame", {
-				Position = UDim2.new(0, 5, 0.5, 0),
-				AnchorPoint = Vector2.new(0, 0.5),
-				Size = UDim2.new(0, 4, 1, -16),
-				BackgroundColor3 = Theme.Accent,
+			-- Bandeau : point d'etat + titre a gauche, phase a droite. Les deux
+			-- prennent la couleur de la phase (STAGE_COLORS), c'est le seul
+			-- endroit colore du HUD.
+			local bandeau = Skin.paint(create("Frame", {
+				Size = UDim2.new(1, 0, 0, 32),
+			}, root), { BackgroundColor3 = "Panel" })
+			Skin.paint(create("Frame", {
+				Position = UDim2.new(0, 0, 1, -1),
+				Size = UDim2.new(1, 0, 0, 1),
 				BorderSizePixel = 0,
-			}, root)
-			corner(accentBar, 2)
+			}, bandeau), { BackgroundColor3 = "Stroke" })
 
-			local statusDot = create("Frame", {
+			local statusDot = Skin.paint(create("Frame", {
 				AnchorPoint = Vector2.new(0, 0.5),
-				Position = UDim2.new(0, 24, 0, 24),
-				Size = UDim2.new(0, 10, 0, 10),
-				BackgroundColor3 = Theme.SubText,
+				Position = UDim2.new(0, 10, 0.5, 0),
+				Size = UDim2.new(0, 7, 0, 7),
 				BorderSizePixel = 0,
-			}, root)
-			corner(statusDot, 5)
+			}, bandeau), { BackgroundColor3 = "SubText" })
+			corner(statusDot, 4)
 
-			create("TextLabel", {
-				Position = UDim2.new(0, 40, 0, 12),
-				Size = UDim2.new(1, -56, 0, 24),
+			Skin.paint(create("TextLabel", {
+				Position = UDim2.new(0, 24, 0, 0),
+				Size = UDim2.new(0.5, 0, 1, 0),
 				BackgroundTransparency = 1,
 				Text = "AUTO BOSS",
+				Font = Enum.Font.Code,
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Left,
+			}, bandeau), { TextColor3 = "SubText" })
+
+			local stageLabel = Skin.paint(create("TextLabel", {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -10, 0, 0),
+				Size = UDim2.new(0.5, -12, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Code,
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Right,
+			}, bandeau), { TextColor3 = "Accent" })
+
+			-- Nom du boss et PV sur la MEME ligne : c'est ce qui fait tomber la
+			-- hauteur totale, les deux se lisent d'un seul coup d'oeil.
+			local bossLabel = Skin.paint(create("TextLabel", {
+				Position = UDim2.new(0, 12, 0, 40),
+				Size = UDim2.new(1, -142, 0, 22),
+				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				TextSize = 17,
-				TextColor3 = Theme.Text,
 				TextXAlignment = Enum.TextXAlignment.Left,
-			}, root)
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			}, root), { TextColor3 = "Text" })
 
-			-- Barre de vie du boss - Element en fond (comme les sliders du
-			-- menu), remplissage Accent qui vire Danger sous 25% pour repérer
-			-- la fenetre de Grip d'un coup d'oeil, texte "X / Y" par-dessus.
-			local hpBarBack = create("Frame", {
-				Position = UDim2.new(0, 20, 0, 44),
-				Size = UDim2.new(1, -40, 0, 22),
-				BackgroundColor3 = Theme.Element,
-			}, root)
-			corner(hpBarBack, 6)
-			local hpBarFill = create("Frame", {
-				Size = UDim2.new(0, 0, 1, 0),
-				BackgroundColor3 = Theme.Accent,
-			}, hpBarBack)
-			corner(hpBarFill, 6)
-			local hpText = create("TextLabel", {
-				Size = UDim2.new(1, 0, 1, 0),
+			local hpText = Skin.paint(create("TextLabel", {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -12, 0, 40),
+				Size = UDim2.new(0, 122, 0, 22),
 				BackgroundTransparency = 1,
 				Text = "-- / --",
-				Font = Enum.Font.GothamBold,
-				TextSize = 13,
-				TextColor3 = Theme.Text,
-				TextStrokeTransparency = 0.5,
-			}, hpBarBack)
-
-			local function makeCell(xScale, xOffset, caption)
-				create("TextLabel", {
-					Position = UDim2.new(xScale, xOffset, 0, 84),
-					Size = UDim2.new(0.5, -32, 0, 16),
-					BackgroundTransparency = 1,
-					Text = caption,
-					Font = Enum.Font.GothamMedium,
-					TextSize = 13,
-					TextColor3 = Theme.SubText,
-					TextXAlignment = Enum.TextXAlignment.Left,
-				}, root)
-				local value = create("TextLabel", {
-					Position = UDim2.new(xScale, xOffset, 0, 104),
-					Size = UDim2.new(0.5, -32, 0, 44),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBold,
-					TextSize = 18,
-					TextColor3 = Theme.Text,
-					TextWrapped = true,
-					TextXAlignment = Enum.TextXAlignment.Left,
-					TextYAlignment = Enum.TextYAlignment.Top,
-				}, root)
-				return value
-			end
-
-			local bossLabel = makeCell(0, 20, "CURRENT BOSS")
-			local reasonLabel = makeCell(0.5, 4, "STOP REASON")
-
-			create("TextLabel", {
-				Position = UDim2.new(0, 20, 1, -30),
-				Size = UDim2.new(0.4, 0, 0, 18),
-				BackgroundTransparency = 1,
-				Text = "STAGE",
-				Font = Enum.Font.GothamMedium,
-				TextSize = 13,
-				TextColor3 = Theme.SubText,
-				TextXAlignment = Enum.TextXAlignment.Left,
-			}, root)
-			local stageLabel = create("TextLabel", {
-				Position = UDim2.new(0.35, 0, 1, -30),
-				Size = UDim2.new(0.6, -20, 0, 18),
-				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				TextSize = 15,
-				TextColor3 = Theme.Accent,
+				Font = Enum.Font.Code,
+				TextSize = 14,
 				TextXAlignment = Enum.TextXAlignment.Right,
-			}, root)
+			}, root), { TextColor3 = "Text" })
+
+			-- Barre de vie : 6 px au lieu de 22, le texte est passe au-dessus.
+			-- Le remplissage vire Danger sous 25 % (comportement conserve) pour
+			-- reperer la fenetre de Grip d'un coup d'oeil.
+			local hpBarBack = Skin.paint(create("Frame", {
+				Position = UDim2.new(0, 12, 0, 68),
+				Size = UDim2.new(1, -24, 0, 6),
+			}, root), { BackgroundColor3 = "Stroke" })
+			corner(hpBarBack, 3)
+			local hpBarFill = Skin.paint(create("Frame", {
+				Size = UDim2.new(0, 0, 1, 0),
+			}, hpBarBack), { BackgroundColor3 = "Accent" })
+			corner(hpBarFill, 3)
+
+			Skin.paint(create("Frame", {
+				Position = UDim2.new(0, 12, 0, 88),
+				Size = UDim2.new(1, -24, 0, 1),
+				BorderSizePixel = 0,
+			}, root), { BackgroundColor3 = "Stroke" })
+
+			Skin.paint(create("TextLabel", {
+				Position = UDim2.new(0, 12, 0, 95),
+				Size = UDim2.new(0, 56, 0, 20),
+				BackgroundTransparency = 1,
+				Text = "RAISON",
+				Font = Enum.Font.Code,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+			}, root), { TextColor3 = "SubTextDim" })
+
+			local reasonLabel = Skin.paint(create("TextLabel", {
+				Position = UDim2.new(0, 74, 0, 95),
+				Size = UDim2.new(1, -86, 0, 20),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamMedium,
+				TextSize = 15,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			}, root), { TextColor3 = "SubText" })
 
 			state.hud = { Root = root, StatusDot = statusDot, HpFill = hpBarFill, HpText = hpText, BossLabel = bossLabel, ReasonLabel = reasonLabel, StageLabel = stageLabel }
 			M.setHudState("None", "Not Found Any Boss", "Waiting")
@@ -3914,12 +4484,26 @@ do
 		function M.setHudState(bossText, reasonText, stageText)
 			local hud = state.hud
 			if not hud then return end
-			hud.BossLabel.Text = "[" .. tostring(bossText) .. "]"
-			hud.ReasonLabel.Text = "[" .. tostring(reasonText) .. "]"
-			hud.StageLabel.Text = tostring(stageText)
-			local color = STAGE_COLORS[stageText] or Theme.SubText
-			hud.StageLabel.TextColor3 = color
-			hud.StatusDot.BackgroundColor3 = color
+
+			-- Plus de crochets autour des valeurs : le nom du boss est
+			-- maintenant le titre de la ligne, pas une donnee entre delimiteurs.
+			-- "None" devient un vrai texte d'absence, en gris efface.
+			local hasBoss = bossText and bossText ~= "None"
+			hud.BossLabel.Text = hasBoss and tostring(bossText) or "Aucun boss"
+			Skin.paint(hud.BossLabel, { TextColor3 = hasBoss and "Text" or "SubTextDim" })
+
+			local quiet = (not reasonText) or reasonText == "None"
+			hud.ReasonLabel.Text = quiet and "Aucune" or tostring(reasonText)
+
+			hud.StageLabel.Text = string.upper(tostring(stageText))
+			local token = STAGE_COLORS[stageText] or "SubText"
+			Skin.paint(hud.StageLabel, { TextColor3 = token })
+			Skin.paint(hud.StatusDot, { BackgroundColor3 = token })
+			-- Une raison presente pendant une phase d'alerte (Paused/Panic) est
+			-- la vraie information a lire : elle passe en Danger comme la phase.
+			Skin.paint(hud.ReasonLabel, { TextColor3 = (not quiet and token == "Danger") and "Danger" or "SubText" })
+
+			MenuChrome.setStatus(hasBoss and bossText or nil, state.hudHp, state.hudHpMax)
 		end
 
 		-- Mise a jour de la barre de vie, appelee a chaque frame depuis le
@@ -3930,14 +4514,17 @@ do
 			local hud = state.hud
 			if not hud then return end
 			if not (current and max and max > 0) then
+				state.hudHp, state.hudHpMax = nil, nil
 				hud.HpFill.Size = UDim2.new(0, 0, 1, 0)
 				hud.HpText.Text = "-- / --"
 				return
 			end
+			state.hudHp = math.max(0, math.floor(current))
+			state.hudHpMax = math.floor(max)
 			local pct = math.clamp(current / max, 0, 1)
 			tween(hud.HpFill, { Size = UDim2.new(pct, 0, 1, 0) }, 0.15)
-			hud.HpFill.BackgroundColor3 = pct <= 0.25 and Theme.Danger or Theme.Accent
-			hud.HpText.Text = string.format("%d / %d", math.max(0, math.floor(current)), math.floor(max))
+			Skin.paint(hud.HpFill, { BackgroundColor3 = pct <= 0.25 and "Danger" or "Accent" })
+			hud.HpText.Text = string.format("%d / %d", state.hudHp, state.hudHpMax)
 		end
 
 		function M.getCombatFns()
@@ -4958,7 +5545,9 @@ do
 			end)
 		end
 
-		local AutoBossSection = addSection(AutoPage, "Auto Boss")
+		-- Pleine largeur : c'est la card la plus chargee du menu (7 reglages + le
+		-- multi-select des boss), elle etoufferait dans une demi-colonne.
+		local AutoBossSection = addSection(AutoPage, "Auto Boss", true)
 		FEATURE_CONTROLS.AutoBossEnabled = addToggleRow(AutoBossSection, "Auto Boss", Settings.AutoBossEnabled, function(value)
 			Settings.AutoBossEnabled = value
 			if value then M.start() else M.stop() end
@@ -5214,20 +5803,17 @@ do
 
 		local BuySection = addSection(AutresPage, "Acheter")
 
-		local ItemNameBox = create("TextBox", {
-			Size = UDim2.new(1, 0, 0, 40),
-			BackgroundColor3 = Theme.Element,
+		local ItemNameBox = Skin.paint(create("TextBox", {
+			Size = UDim2.new(1, 0, 0, 30),
 			Text = "",
 			PlaceholderText = "Nom exact de l'item...",
 			Font = Enum.Font.GothamMedium,
-			TextSize = 15,
-			TextColor3 = Theme.Text,
-			PlaceholderColor3 = Theme.SubText,
+			TextSize = 14,
 			ClearTextOnFocus = false,
-		}, BuySection)
-		corner(ItemNameBox, 8)
-		create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, ItemNameBox)
-		create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, ItemNameBox)
+		}, BuySection), { BackgroundColor3 = "Element", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+		corner(ItemNameBox, 3)
+		Skin.paint(create("UIStroke", { Transparency = 0 }, ItemNameBox), { Color = "Stroke" })
+		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, ItemNameBox)
 
 		addDropdownRow(BuySection, "Choisir dans la liste", BUYABLE_ITEM_NAMES, nil, function(v)
 			ItemNameBox.Text = v
@@ -5395,71 +5981,78 @@ end
 --------------------------------------------------------------------------------
 
 local function addConfigRow(container, name, isDefault, onLoad, onSetDefault, onDelete)
-	local Row = create("Frame", { Size = UDim2.new(1, 0, 0, 78), BackgroundColor3 = Theme.Element }, container)
-	corner(Row, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, Row)
+	local Row = Skin.paint(create("Frame", { Size = UDim2.new(1, 0, 0, 56) }, container), { BackgroundColor3 = "Element" })
+	corner(Row, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, Row), { Color = "Stroke" })
 
-	create("TextLabel", {
-		Position = UDim2.new(0, 12, 0, 8),
-		Size = UDim2.new(1, -24, 0, 20),
+	Skin.paint(create("TextLabel", {
+		Position = UDim2.new(0, 10, 0, 6),
+		Size = UDim2.new(1, -20, 0, 18),
 		BackgroundTransparency = 1,
 		Text = isDefault and (name .. "  \226\152\133 par defaut") or name,
 		Font = Enum.Font.GothamBold,
 		TextSize = 15,
-		TextColor3 = isDefault and Theme.Accent or Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, Row)
+	}, Row), { TextColor3 = isDefault and "Accent" or "Text" })
 
 	local ButtonsHolder = create("Frame", {
-		Position = UDim2.new(0, 12, 0, 34),
-		Size = UDim2.new(1, -24, 0, 32),
+		Position = UDim2.new(0, 10, 0, 27),
+		Size = UDim2.new(1, -20, 0, 23),
 		BackgroundTransparency = 1,
 	}, Row)
 	create("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
-		Padding = UDim.new(0, 8),
+		Padding = UDim.new(0, 6),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, ButtonsHolder)
 
-	local function miniButton(text, color)
-		local Btn = create("TextButton", {
+	-- Trois niveaux : "filled" pour l'action principale (fond accent, texte
+	-- OnAccent), "danger" pour la destructrice (contour et texte rouges, jamais
+	-- de rouge plein - ca attirerait l'oeil plus que Charger), nil pour le
+	-- neutre (contour gris). La couleur n'apparait que la ou l'action compte.
+	local function miniButton(text, kind)
+		local Btn = Skin.paint(create("TextButton", {
 			Size = UDim2.new(0, 0, 1, 0),
 			AutomaticSize = Enum.AutomaticSize.X,
-			BackgroundColor3 = color or Theme.Stroke,
+			BackgroundTransparency = kind == "filled" and 0 or 1,
 			Text = text,
 			Font = Enum.Font.GothamMedium,
-			TextSize = 13,
-			TextColor3 = Color3.new(1, 1, 1),
+			TextSize = 12,
 			AutoButtonColor = false,
-		}, ButtonsHolder)
-		corner(Btn, 6)
-		create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, Btn)
+		}, ButtonsHolder), {
+			BackgroundColor3 = "Accent",
+			TextColor3 = kind == "filled" and "OnAccent" or (kind == "danger" and "Danger" or "SubText"),
+		})
+		corner(Btn, 3)
+		if kind ~= "filled" then
+			Skin.paint(create("UIStroke", { Transparency = 0 }, Btn), {
+				Color = kind == "danger" and "Danger" or "StrokeStrong",
+			})
+		end
+		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, Btn)
 		return Btn
 	end
 
-	miniButton("Charger", Theme.Accent).MouseButton1Click:Connect(onLoad)
+	miniButton("Charger", "filled").MouseButton1Click:Connect(onLoad)
 	miniButton(isDefault and "Retirer defaut" or "Def. par defaut").MouseButton1Click:Connect(onSetDefault)
-	miniButton("Supprimer", Theme.Danger).MouseButton1Click:Connect(onDelete)
+	miniButton("Supprimer", "danger").MouseButton1Click:Connect(onDelete)
 end
 
 do
 	local ConfigSection = addSection(SettingsPage, "Configs")
 
-	local ConfigNameBox = create("TextBox", {
-		Size = UDim2.new(1, 0, 0, 40),
-		BackgroundColor3 = Theme.Element,
+	local ConfigNameBox = Skin.paint(create("TextBox", {
+		Size = UDim2.new(1, 0, 0, 30),
 		Text = "",
 		PlaceholderText = "Nom de la config...",
 		Font = Enum.Font.GothamMedium,
-		TextSize = 15,
-		TextColor3 = Theme.Text,
-		PlaceholderColor3 = Theme.SubText,
+		TextSize = 14,
 		ClearTextOnFocus = false,
-	}, ConfigSection)
-	corner(ConfigNameBox, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, ConfigNameBox)
-	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, ConfigNameBox)
+	}, ConfigSection), { BackgroundColor3 = "Element", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+	corner(ConfigNameBox, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, ConfigNameBox), { Color = "Stroke" })
+	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, ConfigNameBox)
 	attachTooltip(ConfigNameBox, "Enregistre tes reglages actuels sous ce nom, marque-en une par defaut pour la recharger au demarrage.")
 
 	local ConfigListContainer = create("Frame", {
@@ -5495,11 +6088,13 @@ do
 					saveMeta()
 					notify(Meta.defaultConfig == name and ("'" .. name .. "' est la config par defaut.") or "Plus de config par defaut.")
 					refreshConfigList()
+					MenuChrome.refreshRight()
 				end,
 				function()
 					deleteConfig(name)
 					notify("Config '" .. name .. "' supprimee.", "success")
 					refreshConfigList()
+					MenuChrome.refreshRight()
 				end
 			)
 		end
@@ -5544,11 +6139,25 @@ end
 --------------------------------------------------------------------------------
 
 do
+	-- Le theme est une preference d'app (comme la taille de fenetre ou la touche
+	-- du menu), pas un reglage "cheat" : il vit dans Prefs et se recharge a
+	-- chaque session, independamment du systeme de configs.
+	local AppearanceSection = addSection(SettingsPage, "Apparence")
+	addDropdownRow(AppearanceSection, "Theme", Skin.order, Skin.current, function(name)
+		Skin.set(name)
+		Prefs.MenuTheme = name
+		savePrefs()
+	end)
+	addLabelRow(AppearanceSection, "Graphite est achromatique : l'accent y est le blanc du texte. Papier est clair, il eblouit sur une scene sombre.")
+end
+
+do
 	local ShortcutSection = addSection(SettingsPage, "Raccourcis")
 	addKeybindRow(ShortcutSection, "Touche menu", MENU_TOGGLE_KEY, function(newKey)
 		MENU_TOGGLE_KEY = newKey
 		Prefs.MenuKeybind = newKey.Name
 		savePrefs()
+		MenuChrome.refreshRight()
 	end)
 end
 
@@ -5564,21 +6173,19 @@ end
 do
 	local WebhookSection = addSection(SettingsPage, "Webhook Discord")
 
-	local WebhookUrlBox = create("TextBox", {
-		Size = UDim2.new(1, 0, 0, 40),
-		BackgroundColor3 = Theme.Element,
+	local WebhookUrlBox = Skin.paint(create("TextBox", {
+		Size = UDim2.new(1, 0, 0, 30),
 		Text = Prefs.InventoryWebhookUrl or "",
 		PlaceholderText = "https://discord.com/api/webhooks/...",
-		Font = Enum.Font.GothamMedium,
-		TextSize = 14,
-		TextColor3 = Theme.Text,
-		PlaceholderColor3 = Theme.SubText,
+		Font = Enum.Font.Code,
+		TextSize = 12,
 		ClearTextOnFocus = false,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, WebhookSection)
-	corner(WebhookUrlBox, 8)
-	create("UIStroke", { Color = Theme.Stroke, Transparency = 0.4 }, WebhookUrlBox)
-	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, WebhookUrlBox)
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, WebhookSection), { BackgroundColor3 = "Element", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+	corner(WebhookUrlBox, 3)
+	Skin.paint(create("UIStroke", { Transparency = 0 }, WebhookUrlBox), { Color = "Stroke" })
+	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, WebhookUrlBox)
 	attachTooltip(WebhookUrlBox, "Utilise par l'envoi auto d'inventaire (page Auto > Envoi Auto Inventaire).")
 
 	addButtonRow(WebhookSection, "Enregistrer le webhook", function()
@@ -5633,22 +6240,34 @@ local function unload()
 	ScreenGui:Destroy()
 end
 
-local SessionSection = addSection(SettingsPage, "Session")
-local UnloadButton = create("TextButton", {
-	Size = UDim2.new(1, 0, 0, 50),
-	BackgroundColor3 = Theme.Danger,
+-- Section large (3e argument) : le bouton de decharge est la seule action
+-- irreversible du menu, il ne partage pas sa rangee avec autre chose.
+-- Passe par MenuChrome.track pour etre indexe par la recherche, comme toute
+-- ligne construite a la main plutot que par un add*Row.
+local SessionSection = addSection(SettingsPage, "Session", true)
+local UnloadButton = MenuChrome.track(Skin.paint(create("TextButton", {
+	Size = UDim2.new(1, 0, 0, 30),
+	BackgroundTransparency = 1,
 	Text = "Decharger le script",
 	Font = Enum.Font.GothamBold,
-	TextSize = 18,
-	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 15,
 	AutoButtonColor = false,
-}, SessionSection)
-corner(UnloadButton, 10)
+}, SessionSection), { BackgroundColor3 = "Danger", TextColor3 = "Danger" }), "Decharger le script")
+corner(UnloadButton, 3)
+Skin.paint(create("UIStroke", { Transparency = 0 }, UnloadButton), { Color = "Danger" })
 local unloadScale = create("UIScale", { Scale = 1 }, UnloadButton)
-UnloadButton.MouseEnter:Connect(function() tween(UnloadButton, { BackgroundColor3 = Color3.fromRGB(250, 110, 110) }, 0.1) end)
-UnloadButton.MouseLeave:Connect(function() tween(UnloadButton, { BackgroundColor3 = Theme.Danger }, 0.1) end)
+-- Contour rouge au repos, rouge plein au survol : visible sans hurler dans une
+-- page ou tout le reste est neutre.
+UnloadButton.MouseEnter:Connect(function()
+	UnloadButton.BackgroundTransparency = 0
+	tween(UnloadButton, { TextColor3 = Theme.OnAccent }, 0.1)
+end)
+UnloadButton.MouseLeave:Connect(function()
+	UnloadButton.BackgroundTransparency = 1
+	tween(UnloadButton, { TextColor3 = Theme.Danger }, 0.1)
+end)
 UnloadButton.MouseButton1Click:Connect(function()
-	tween(unloadScale, { Scale = 0.96 }, 0.08)
+	tween(unloadScale, { Scale = 0.97 }, 0.08)
 	task.delay(0.08, function() tween(unloadScale, { Scale = 1 }, 0.12) end)
 	unload()
 end)
@@ -5745,7 +6364,14 @@ setTimeChanger(FeatureState.TimeChangerEnabled)
 setNoclip(FeatureState.NoclipEnabled)
 setFly(FeatureState.FlyEnabled)
 
+-- Ferme la derniere section ouverte : les lignes creees APRES ce point le sont
+-- dynamiquement (liste de configs reconstruite, dropdown de teleport rafraichi)
+-- et ne doivent pas s'accumuler dans l'index de la recherche, qui suppose des
+-- lignes stables.
+MenuChrome.currentSection = nil
+
 selectPage("Visuels")
+MenuChrome.refreshRight() -- remplit la moitie droite de la barre d'etat (config + touche menu)
 playInjectionSplash()
 KeybindTool.refreshHud() -- construit le HUD une fois tous les KeybindTool.bind faits plus haut
 
