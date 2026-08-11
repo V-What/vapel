@@ -4103,7 +4103,7 @@ do
 			-- physique - Hyuga BossPortal/BossEntrances - pas un remote
 			-- d'activation simple comme Lavarossa/Barbarit).
 			["Hyuga Boss"] = {
-				attachOffset = Vector3.new(0, 9, 0),
+				attachOffset = Vector3.new(0, 10, 0),
 				rewardsModel = "Hyuga BossRewards",
 				dodgeAnimationIds = { "8580099842", "8699113073" },
 				dodgeOffset = Vector3.new(0, 35, 0),
@@ -4124,6 +4124,13 @@ do
 				rewardsModel = "MandaRewards",
 				spawnFloor = "MandaFloor",
 				spawnEvent = "activateManda",
+				-- 300 au lieu des 500 par defaut : constate en live, Auto Boss
+				-- s'est accroche a un Manda de quete appartenant a un autre
+				-- joueur, que le rayon large laissait passer. Le vrai world boss
+				-- se tient a 67 studs de MandaFloor (mesure) - 300 garde donc
+				-- une marge confortable pour ses deplacements en combat tout en
+				-- ecartant les instances lointaines.
+				spawnRadius = 300,
 				dodgeAnimationIds = { "9954909571" },
 				dodgeOffset = Vector3.new(0, 58, 0),
 				lootWaitPosition = Vector3.new(1526.775146484375, -534.0000610351562, 726.8818359375),
@@ -4143,6 +4150,49 @@ do
 				dodgeAnimationIds = { "9954909571" },
 				dodgeOffset = Vector3.new(0, 60, 0),
 				lootWaitPosition = Vector3.new(-604.2379760742188, -548.9771118164062, -1481.6185302734375),
+			},
+			-- The Ringed Samurai : 1500 PV, CanBeGripped=true (donc pas de
+			-- gripImmune), spawn manuel SamuraiFloor/activateSamurai comme
+			-- Lavarossa/Barbarit/Manda - le tout lu dans GameManager.NPC.
+			--
+			-- Valeurs relevees au sniffer sur un combat complet du script de
+			-- reference (voir sniff_boss.lua) :
+			--   - hauteur de vol : offY median 10 sur 416 echantillons ;
+			--   - esquive : montee a offY ~60, declenchee par l'animation
+			--     137738911755203, qui precede les 3 montees observees avec un
+			--     retard constant de 0.15-0.19s. Les animations 180435571 et
+			--     9632306251 apparaissent aussi pendant la montee mais ne la
+			--     precedent qu'une fois sur trois : ce sont des animations de
+			--     deplacement qui se superposent, pas le declencheur.
+			--
+			-- Deux points a surveiller, tires des donnees du jeu :
+			--   - HealingRing (CD 15s) : ce boss SE SOIGNE. Sur 1500 PV, si la
+			--     cadence de degats est trop faible le combat peut trainer.
+			--   - SpawnLavalightRing (CD 15s) invoque des Lavalight Guard/Brute.
+			--     Aucun n'est apparu pendant la capture, donc leur gestion n'est
+			--     pas verifiee ici.
+			["The Ringed Samurai"] = {
+				-- 12 et pas les 10 mesures sur la reference : a 10, "Club Spin"
+				-- (la toupie, 4 degats mais en rafale) touchait trop souvent.
+				-- Attention, 12 n'est peut-etre pas encore assez : dans la
+				-- capture de reference, des coups de cette meme toupie ont porte
+				-- jusqu'a offY 12.3 (serie de -3 relevee a 11.3, 11.6 et 12.3).
+				-- Si ca continue, monter franchement vers 15-16 plutot que de
+				-- gratter stud par stud.
+				attachOffset = Vector3.new(0, 12, 0),
+				rewardsModel = "SamuraiRewards",
+				spawnFloor = "SamuraiFloor",
+				spawnEvent = "activateSamurai",
+				dodgeAnimationIds = { "137738911755203" },
+				dodgeOffset = Vector3.new(0, 60, 0),
+				-- "Club Spin" (la toupie) : on ne s'eloigne pas, on prend juste
+				-- 2 studs de plus le temps qu'elle tourne, puis on redescend
+				-- taper. Animation identifiee en attribuant chaque coup recu a
+				-- l'animation qui le precede : 9656290960 a produit les trois
+				-- coups de -3 releves a offY 11.3, 11.6 et 12.3.
+				riseAnimationIds = { "9656290960" },
+				riseOffset = Vector3.new(0, 14, 0),
+				lootWaitPosition = Vector3.new(1609.6252, -488.2617, -594.3062),
 			},
 			-- Wooden Golem : toujours present (pas de spawnFloor/spawnEvent -
 			-- CustomArena/AlwaysAggro=true dans GameManager.NPC). GripImmunity=true
@@ -4170,6 +4220,17 @@ do
 				attachOffset = Vector3.new(0, 9, 0),
 				rewardsModel = "WoodenGolemRewards",
 				dodgeAnimationIds = { "116907126244057", "120758909308511" },
+				-- Propre au Wooden Golem : ses degats arrivent BIEN apres la fin
+				-- de l'animation, avec des delais tres reguliers mesures au
+				-- sniffer sur plusieurs combats -
+				--   Spire  -> le coup tombe a t+1.35, +1.40, +1.40 s
+				--   Dragon -> le coup tombe a t+3.87, +3.94 s
+				-- Rester en esquive seulement pendant l'animation ne couvrait donc
+				-- pas le Dragon : on etait deja revenu au contact quand le coup
+				-- partait. 4.5s laisse une demi-seconde de marge apres le plus
+				-- tardif observe. Les autres boss n'ont pas ce decalage et gardent
+				-- la valeur par defaut (0) : inutile de les ralentir.
+				dodgeWindowSeconds = 4.5,
 				dodgeCyclePositions = {
 					Vector3.new(-4726.7885, 336.9198, -3006.4700),
 					Vector3.new(-4718.8340, 336.9197, -2856.7888),
@@ -4183,7 +4244,7 @@ do
 		-- Liste ordonnee pour le dropdown de selection (meme pattern que
 		-- GEM_NAMES/AutoInfuseGems) - a completer en meme temps que
 		-- BOSS_CONFIGS quand un boss est ajoute, pour la rota multi-boss.
-		local BOSS_NAMES = { "Tairock", "Lavarossa", "Chakra Knight", "Barbarit The Rose", "Hyuga Boss", "Manda", "Lava Snake", "Wooden Golem" }
+		local BOSS_NAMES = { "Tairock", "Lavarossa", "Chakra Knight", "Barbarit The Rose", "Hyuga Boss", "Manda", "Lava Snake", "Wooden Golem", "The Ringed Samurai" }
 
 		Settings.AutoBossSelected = Settings.AutoBossSelected or {}
 		for _, name in ipairs(BOSS_NAMES) do
@@ -4198,20 +4259,16 @@ do
 		-- M.setHudState puisse reafficher la meme valeur dans la barre d'etat du
 		-- menu sans que l'appelant ait a les repasser.
 		-- dodgeUntil : instant (os.clock) jusqu'auquel on reste en esquive, arme
-		-- au DEBUT de l'animation d'attaque - voir DODGE_WINDOW_SECONDS et
+		-- au DEBUT de l'animation d'attaque - voir dodgeWindowSeconds et
 		-- M.isDodging.
-		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
+		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, riseActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
 
-		-- Duree pendant laquelle on reste en esquive, comptee depuis le DEBUT de
-		-- l'animation d'attaque (pas depuis sa fin). Les degats arrivent bien
-		-- apres que l'animation soit terminee, avec des delais tres reguliers
-		-- mesures au sniffer :
-		--   Spire  -> le coup tombe a t+1.35, +1.40, +1.40 s
-		--   Dragon -> le coup tombe a t+3.87, +3.94 s
-		-- Se caler sur la fin de l'animation (+1s) ne couvrait donc pas le
-		-- Dragon : on etait deja revenu au contact quand le coup partait.
-		-- 4.5s laisse une marge d'une demi-seconde apres le plus tardif observe.
-		local DODGE_WINDOW_SECONDS = 4.5
+		-- Valeur par defaut : 0, c'est-a-dire "on esquive tant que l'animation
+		-- joue, et pas une seconde de plus" - le comportement d'origine, qui
+		-- convient a tous les boss sauf le Wooden Golem. Ce dernier fixe
+		-- dodgeWindowSeconds dans sa config (voir BOSS_CONFIGS) parce que ses
+		-- degats arrivent BIEN apres la fin de l'animation.
+		local DEFAULT_DODGE_WINDOW = 0
 		local M = {}
 
 		function M.getDataEvent()
@@ -4829,6 +4886,26 @@ do
 			return false
 		end
 
+		-- Maintient la position du Safe Spot pendant les pauses (Panic Heal,
+		-- Chakra Sense). Un seul teleport a l'ENTREE de la pause ne suffisait
+		-- pas : un knockback, un pull ou une attaque a effet de zone nous
+		-- decalait ensuite sans que rien ne corrige, et on restait a derive
+		-- dans le monde en croyant etre a l'abri. Appelee a chaque tick des
+		-- branches de pause.
+		--
+		-- Ne reteleporte qu'au-dela de 5 studs d'ecart : inutile de forcer un
+		-- CFrame (et l'ancrage bref qui va avec) a chaque tick alors qu'on est
+		-- deja en place.
+		function M.holdSafeSpot()
+			if not SafeSpotPosition then return end
+			local character = LocalPlayer.Character
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			if not rootPart then return end
+			if (rootPart.Position - SafeSpotPosition).Magnitude > 5 then
+				M.teleportRootPart(rootPart, SafeSpotPosition)
+			end
+		end
+
 		-- HumanoidRootPart plutot que Head : reste centre/stable, alors que
 		-- Head bouge avec les animations d'attaque du boss - confirme en live
 		-- que ca donne un suivi net (Head donnait le "chelou" observe).
@@ -4877,21 +4954,6 @@ do
 			return items
 		end
 
-		-- Confirmation post-settle (voir M.collectLoot) : apres les 5s
-		-- d'attente a lootWaitPosition, verifie qu'au moins un item est bien
-		-- visible avant de foncer sur le ramassage - protege contre un spawn
-		-- serveur anormalement lent (rare, mais evite de looter dans le vide).
-		-- S'arrete aussi immediatement si une menace Chakra Sense apparait.
-		function M.waitForLoot(rewards, timeoutSeconds)
-			local deadline = os.clock() + timeoutSeconds
-			while os.clock() < deadline do
-				if Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive() then return false end
-				if #M.findRewardItems(rewards) > 0 then return true end
-				task.wait(0.2)
-			end
-			return false
-		end
-
 		-- Auto loot : le vrai pickup n'est pas un contact physique mais un
 		-- clic (mouse.Target sur l'item en jeu), confirme par l'utilisateur
 		-- via un dump decompile (Cobalt) : DataEvent:FireServer("PickUp",
@@ -4935,95 +4997,98 @@ do
 				return Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive()
 			end
 
-			-- Se teleporter a lootWaitPosition (centre entre tous les
-			-- TrinketSpawn, capture en live - repli sur spawns[1] si pas
-			-- encore capturee pour ce boss) et attendre 5s SUR PLACE avant de
-			-- commencer a looter, plutot que de foncer des le premier trinket
-			-- vu : laisse le temps a tous les autres de spawner.
-			M.teleportRootPart(rootPart, config.lootWaitPosition or spawns[1].Position)
+			-- Boucle unique, pilotee par ce qui est REELLEMENT au sol, au lieu de
+			-- l'ancien enchainement "attendre 5s, puis deux passages fixes" :
+			--   - des qu'un item apparait on va le chercher, sans attendre la fin
+			--     d'un delai arbitraire ;
+			--   - tant qu'il en reste, on continue (plus de nombre de passages
+			--     fige, donc plus de loot oublie parce qu'il a spawn en retard) ;
+			--   - on ne conclut qu'apres LOOT_QUIET_SECONDS sans rien de nouveau.
+			local LOOT_QUIET_SECONDS = 4    -- calme avant de conclure, une fois du loot vu
+			local LOOT_FIRST_SECONDS = 12   -- patience avant de conclure "rien a looter"
+			local LOOT_MAX_SECONDS = 60     -- garde-fou global, ne doit jamais servir
+			local PICKUP_ATTEMPTS = 3       -- essais par item avant de l'abandonner
 
-			local LOOT_SETTLE_SECONDS = 5
-			local settleDeadline = os.clock() + LOOT_SETTLE_SECONDS
-			while os.clock() < settleDeadline do
+			local waitPosition = config.lootWaitPosition or spawns[1].Position
+			local attempts, givenUp = {}, {}
+			local collectedNames, refusedCount = {}, 0
+			local sawAny = false
+			local lastActivity = os.clock()
+			local deadline = os.clock() + LOOT_MAX_SECONDS
+
+			while os.clock() < deadline do
 				if threatened() then return "interrupted" end
-				task.wait(0.2)
-			end
 
-			-- Confirme qu'il y a bien quelque chose a looter apres le settle -
-			-- 10s max (au lieu de 5s) : un settle qui se termine pile avant
-			-- que le premier trinket spawn ne doit pas conclure "rien a
-			-- looter" et repartir prematurement, mieux vaut attendre un peu
-			-- plus avant d'abandonner.
-			if threatened() then return "interrupted" end
-			if not M.waitForLoot(rewards, 10) then
-				return threatened() and "interrupted" or "done" -- "done" = rien a looter (timeout normal)
-			end
-
-			-- Nom des items presents AVANT le ramassage (voir plus bas : sert
-			-- a calculer ce qui a vraiment ete ramasse pour la notif Discord,
-			-- par difference avec ce qui reste apres - plus fiable que
-			-- d'accumuler pendant pickUpAll, qui peut retenter le meme item
-			-- deux fois sur le deuxieme passage sans que ca veuille dire
-			-- deux ramassages distincts).
-			local initialNames = {}
-			for _, item in ipairs(M.findRewardItems(rewards)) do
-				table.insert(initialNames, item.Name)
-			end
-
-			-- Portee courte requise pour que le PickUp soit accepte cote
-			-- serveur (confirme en live : ~3 studs marche, ~11-17 studs non,
-			-- meme avec un ID valide et Active=true) - il faut se deplacer
-			-- SUR chaque item individuellement, pas juste une fois vers
-			-- spawns[1] (les items sont disperses sur les differents
-			-- TrinketSpawnN, potentiellement loin les uns des autres).
-			local function pickUpAll()
+				local pending = {}
 				for _, item in ipairs(M.findRewardItems(rewards)) do
-					if threatened() then return false end
-					local idValue = item:FindFirstChild("ID")
-					local activeValue = item:FindFirstChild("Active")
-					if idValue and (not activeValue or activeValue.Value ~= false) then
-						M.teleportRootPart(rootPart, item.Position)
-						task.wait(0.3)
-						pcall(function()
-							DataEvent:FireServer("PickUp", idValue.Value)
-						end)
-						task.wait(0.3)
+					if not givenUp[item] then table.insert(pending, item) end
+				end
+
+				if #pending == 0 then
+					-- Rien a ramasser : on TIENT la position d'attente au lieu de
+					-- s'y teleporter une seule fois. Un knockback ou un pull
+					-- pendant l'attente nous decalait sans que rien ne corrige,
+					-- et on repartait ensuite d'un mauvais point.
+					M.teleportRootPart(rootPart, waitPosition)
+					local quiet = sawAny and LOOT_QUIET_SECONDS or LOOT_FIRST_SECONDS
+					if os.clock() - lastActivity > quiet then break end
+					task.wait(0.1)
+				else
+					sawAny = true
+					for _, item in ipairs(pending) do
+						if threatened() then return "interrupted" end
+
+						local idValue = item:FindFirstChild("ID")
+						local activeValue = item:FindFirstChild("Active")
+						if not (idValue and (not activeValue or activeValue.Value ~= false)) then
+							givenUp[item] = true
+						else
+							local itemName = item.Name
+
+							-- Portee courte exigee par le serveur (mesure : ~3 studs
+							-- passe, ~11-17 non, meme avec un ID valide). On se
+							-- repositionne JUSTE avant de tirer le remote, et pas
+							-- seulement avant l'attente : sinon un knockback recu
+							-- entre-temps nous mettait hors de portee et le pickup
+							-- etait rejete sans qu'on comprenne pourquoi.
+							M.teleportRootPart(rootPart, item.Position)
+							task.wait(0.1)
+							M.teleportRootPart(rootPart, item.Position)
+							pcall(function()
+								DataEvent:FireServer("PickUp", idValue.Value)
+							end)
+							task.wait(0.25)
+
+							if item.Parent then
+								-- Toujours la : le serveur a refuse. On recompte, et
+								-- au bout de PICKUP_ATTEMPTS on passe a la suite au
+								-- lieu de boucler sur un item qui ne partira jamais
+								-- (typiquement la limite d'inventaire atteinte pour
+								-- ce type d'objet - le serveur refuse en silence).
+								attempts[item] = (attempts[item] or 0) + 1
+								if attempts[item] >= PICKUP_ATTEMPTS then
+									givenUp[item] = true
+									refusedCount = refusedCount + 1
+								end
+							else
+								table.insert(collectedNames, itemName)
+								lastActivity = os.clock()
+							end
+						end
 					end
 				end
-				return true
 			end
 
-			if not pickUpAll() then return "interrupted" end
-
-			-- Deuxieme passage pour les items encore la (arrives en retard,
-			-- premier essai rate...), puis verification finale.
-			task.wait(0.5)
-			if threatened() then return "interrupted" end
-			if not pickUpAll() then return "interrupted" end
-
-			task.wait(0.3)
-			local stillThere = M.findRewardItems(rewards)
-			local missed = #stillThere
-			if missed > 0 then
-				notify(missed .. " loot(s) pas ramasse(s) sur " .. config.rewardsModel .. " (peut-etre pas autorise via ClearedToPickUp).", "error")
+			-- Compte ce qui reste vraiment au sol, abandonnes compris.
+			local stillThere = #M.findRewardItems(rewards)
+			if refusedCount > 0 then
+				notify(refusedCount .. " loot(s) refuse(s) par le serveur apres " .. PICKUP_ATTEMPTS
+					.. " essais - inventaire plein pour cet objet, ou pas autorise (ClearedToPickUp).", "error")
+			elseif stillThere > 0 then
+				notify(stillThere .. " loot(s) encore au sol sur " .. config.rewardsModel .. ".", "error")
 			end
 
-			if Settings.NotifyLootEnabled and #initialNames > missed then
-				-- Difference multiset (initialNames - stillThere) plutot
-				-- qu'une simple soustraction de comptes : gere correctement
-				-- les noms d'items dupliques.
-				local remaining = {}
-				for _, item in ipairs(stillThere) do
-					remaining[item.Name] = (remaining[item.Name] or 0) + 1
-				end
-				local collectedNames = {}
-				for _, name in ipairs(initialNames) do
-					if remaining[name] and remaining[name] > 0 then
-						remaining[name] = remaining[name] - 1
-					else
-						table.insert(collectedNames, name)
-					end
-				end
+			if Settings.NotifyLootEnabled and #collectedNames > 0 then
 				M.notifyLootWebhook(state.lastBossName or config.rewardsModel, collectedNames)
 			end
 
@@ -5128,6 +5193,7 @@ do
 			state.dodging = false
 			state.dodgeActiveCount = 0
 			state.dodgeUntil = 0
+			state.riseActiveCount = 0
 			state.gripping = false
 
 			-- dodgeAnimationIds (voir BOSS_CONFIGS, ex: Chakra Knight) : bascule
@@ -5142,28 +5208,52 @@ do
 				state.dodgeAnimConn:Disconnect()
 				state.dodgeAnimConn = nil
 			end
-			if config.dodgeAnimationIds then
+			if config.dodgeAnimationIds or config.riseAnimationIds then
 				local bossHumanoid = boss:FindFirstChild("Humanoid")
 				if bossHumanoid then
+					-- Un id figure-t-il dans une des listes de la config ?
+					local function matches(id, list)
+						if not list then return false end
+						for _, wanted in ipairs(list) do
+							if id:find(wanted, 1, true) then return true end
+						end
+						return false
+					end
+
 					state.dodgeAnimConn = bossHumanoid.AnimationPlayed:Connect(function(animTrack)
 						local anim = animTrack.Animation
 						local id = anim and tostring(anim.AnimationId)
 						if not id then return end
-						local matched = false
-						for _, dodgeId in ipairs(config.dodgeAnimationIds) do
-							if id:find(dodgeId, 1, true) then
-								matched = true
-								break
-							end
+
+						-- riseAnimationIds : montee LEGERE, pour les attaques a
+						-- courte portee qu'il suffit de survoler de quelques studs
+						-- (ex: "Club Spin", la toupie du Ringed Samurai - 4 degats
+						-- mais en rafale, portee mesuree jusqu'a offY 12.3).
+						-- Rien a voir avec l'esquive complete : on reste au contact
+						-- pour continuer a taper, on prend juste un peu de hauteur.
+						if matches(id, config.riseAnimationIds) then
+							state.riseActiveCount = state.riseActiveCount + 1
+							local riseStopped
+							riseStopped = animTrack.Stopped:Connect(function()
+								state.riseActiveCount = math.max(0, state.riseActiveCount - 1)
+								riseStopped:Disconnect()
+							end)
+							return
 						end
-						if not matched then return end
+
+						if not matches(id, config.dodgeAnimationIds) then return end
 						state.dodgeActiveCount = state.dodgeActiveCount + 1
 						state.dodging = true
-						-- La fenetre part d'ICI, du debut de l'animation : c'est le
-						-- seul repere temporel fiable pour les degats (voir
-						-- DODGE_WINDOW_SECONDS). Un nouveau declenchement pendant une
-						-- esquive en cours repousse l'echeance, jamais ne la raccourcit.
-						state.dodgeUntil = math.max(state.dodgeUntil, os.clock() + DODGE_WINDOW_SECONDS)
+						-- Fenetre propre a CE boss : elle part d'ici, du debut de
+						-- l'animation, seul repere temporel fiable pour les degats.
+						-- A 0 (tous les boss sauf le Wooden Golem), ca ne change
+						-- rien : l'esquive dure juste le temps de l'animation.
+						-- Un nouveau declenchement pendant une esquive en cours
+						-- repousse l'echeance, jamais ne la raccourcit.
+						local window = config.dodgeWindowSeconds or DEFAULT_DODGE_WINDOW
+						if window > 0 then
+							state.dodgeUntil = math.max(state.dodgeUntil, os.clock() + window)
+						end
 						-- dodgeCyclePositions (ex: Wooden Golem) : declenche aussi le Sub
 						-- (M.trySubstitute, jutsu de substitution - voir plus haut) DES LE
 						-- DEBUT du dodge, en plus du cyclage ancre. M.trySubstitute est
@@ -5232,7 +5322,12 @@ do
 					local index = (math.floor(os.clock() * 10) % #positions) + 1
 					targetPosition = positions[index]
 				else
-					local offset = state.gripping and GRIP_APPROACH_OFFSET or (dodging and config.dodgeOffset) or config.attachOffset
+					-- Priorite : approche de Grip > esquive complete > montee
+					-- legere (riseOffset, voir riseAnimationIds) > vol normal.
+					local offset = state.gripping and GRIP_APPROACH_OFFSET
+						or (dodging and config.dodgeOffset)
+						or (state.riseActiveCount > 0 and config.riseOffset)
+						or config.attachOffset
 					targetPosition = anchor.Position + offset
 				end
 				if rootPart.Anchored then
@@ -5382,6 +5477,7 @@ do
 							notify(string.format("PV sous %d%% - pause Auto Boss, retour au Safe Spot.", Settings.PanicHealThreshold), "error")
 							teleportToSafeSpot()
 						end
+						M.holdSafeSpot() -- a chaque tick, pas seulement a l'entree (voir M.holdSafeSpot)
 						M.setHudState(state.lastBossName or "None", string.format("PV bas (%d%%)", math.floor(myHealthPercent)), "Panic")
 						task.wait(0.3)
 					elseif threatActive then
@@ -5402,6 +5498,7 @@ do
 							notify("Chakra Sense detecte a proximite - pause Auto Boss, retour au Safe Spot.", "error")
 							teleportToSafeSpot()
 						end
+						M.holdSafeSpot()
 						M.setHudState(state.lastBossName or "None", "Chakra Sense actif a proximite", "Paused")
 						task.wait(0.5)
 					elseif state.chakraSensePaused then
@@ -5411,6 +5508,7 @@ do
 						-- lieu de rattacher puis se re-detacher en boucle.
 						state.resumeDeadline = state.resumeDeadline or (os.clock() + CHAKRA_SENSE_RESUME_DELAY_SECONDS)
 						if os.clock() < state.resumeDeadline then
+							M.holdSafeSpot() -- toujours en pause tant qu'on n'a pas repris
 							M.setHudState(state.lastBossName or "None", "Chakra Sense actif a proximite", "Resuming")
 							task.wait(0.2)
 						else
@@ -5423,6 +5521,7 @@ do
 							state.panicPaused = false
 							notify("PV remontes au-dessus du seuil - reprise de l'Auto Boss.", "success")
 						else
+							M.holdSafeSpot() -- PV toujours bas : on reste tenu au Safe Spot
 							M.setHudState(state.lastBossName or "None", string.format("PV bas (%d%%)", math.floor(myHealthPercent)), "Panic")
 							task.wait(0.3)
 						end
