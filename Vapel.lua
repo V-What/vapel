@@ -692,16 +692,32 @@ local function applyChatOverlay(player)
 	data.maxHealthConn = humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(updateHealth)
 end
 
+-- Vrai <=> ce joueur a deja un overlay VALIDE. Pas seulement "une entree
+-- existe" : le billboard est parente au HumanoidRootPart, donc il est detruit
+-- avec le personnage (mort, respawn, streaming). L'entree, elle, survit et
+-- pointe alors dans le vide - d'ou la verification du parent ET de l'adornee,
+-- qui doit etre le HumanoidRootPart COURANT.
+local function hasLiveOverlay(player)
+	local data = ChatOverlayByPlayer[player]
+	if not (data and data.billboard and data.billboard.Parent) then return false end
+	local character = player.Character
+	return character ~= nil and data.billboard.Adornee == character:FindFirstChild("HumanoidRootPart")
+end
+
 local function onPlayerAdded(player)
 	if player == LocalPlayer then return end
 
-	player.CharacterAdded:Connect(function(character)
+	track(player.CharacterAdded:Connect(function(character)
 		if unloaded then return end
-		character:WaitForChild("HumanoidRootPart", 10)
-		task.wait() -- laisse le Humanoid se parenter
+		-- Attendre les DEUX : un HumanoidRootPart present ne garantit pas que le
+		-- Humanoid soit deja parente, et applyChatOverlay exige les deux (il
+		-- abandonne sinon). L'ancien code n'attendait que le HumanoidRootPart
+		-- puis laissait passer une seule frame.
+		if not character:WaitForChild("HumanoidRootPart", 15) then return end
+		if not character:WaitForChild("Humanoid", 5) then return end
 		if unloaded then return end
 		applyChatOverlay(player)
-	end)
+	end))
 
 	if player.Character then applyChatOverlay(player) end
 end
@@ -711,6 +727,40 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 track(Players.PlayerAdded:Connect(onPlayerAdded))
 track(Players.PlayerRemoving:Connect(clearChatOverlay))
+
+-- Rattrapage periodique : recree tout overlay manquant.
+--
+-- Les accroches evenementielles ci-dessus font chacune UNE tentative, et
+-- echouent silencieusement si le personnage n'est pas pret au bon moment :
+--   - `if player.Character then applyChatOverlay(player) end` s'execute au
+--     chargement du script pour les joueurs deja la ; le Character peut exister
+--     alors que le HumanoidRootPart n'est pas encore parente - applyChatOverlay
+--     abandonne, et plus rien ne relancait.
+--   - CharacterAdded abandonne si le personnage n'arrive pas dans le delai.
+--   - Un personnage detruit puis restreame (joueur qui s'eloigne puis revient)
+--     ne redeclenche pas CharacterAdded : le billboard est parti avec.
+-- Constate en jeu : certains joueurs n'apparaissaient jamais dans l'ESP.
+-- Plutot que d'essayer d'enumerer toutes les courses possibles, on reconcilie :
+-- une passe par seconde, qui ne fait rien tant que tout va bien.
+-- Pas de track() ici : il attend une connexion a Disconnect, pas un thread.
+-- Le garde `unloaded` suffit a arreter la boucle (meme pattern que les autres
+-- boucles de ce fichier, ex: le HUD des keybinds).
+task.spawn(function()
+	while not unloaded do
+		task.wait(1)
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer and not hasLiveOverlay(player) then
+				local character = player.Character
+				if character
+					and character:FindFirstChild("HumanoidRootPart")
+					and character:FindFirstChildWhichIsA("Humanoid")
+				then
+					applyChatOverlay(player)
+				end
+			end
+		end
+	end
+end)
 
 local function setEnabled(state)
 	FeatureState.enabled = state
@@ -4070,7 +4120,7 @@ do
 			-- reellement en position de combat - fausse mesure, corrigee ici
 			-- avec des donnees prises en plein combat actif.)
 			Manda = {
-				attachOffset = Vector3.new(0, 6, 0),
+				attachOffset = Vector3.new(0, 12, 0),
 				rewardsModel = "MandaRewards",
 				spawnFloor = "MandaFloor",
 				spawnEvent = "activateManda",
@@ -4086,7 +4136,7 @@ do
 			-- reprennent des le retour au hover normal ~5-7 studs) -
 			-- correlation nette et reproductible (observee 2 fois).
 			["Lava Snake"] = {
-				attachOffset = Vector3.new(0, 6, 0),
+				attachOffset = Vector3.new(0, 12, 0),
 				rewardsModel = "LavaSnakeRewards",
 				spawnFloor = "LavaSnakeFloor",
 				spawnEvent = "activateLavaSnake",
@@ -4097,12 +4147,25 @@ do
 			-- Wooden Golem : toujours present (pas de spawnFloor/spawnEvent -
 			-- CustomArena/AlwaysAggro=true dans GameManager.NPC). GripImmunity=true
 			-- cote GameManager - voir gripImmune plus bas et son usage dans la
-			-- section Grip du main loop. dodgeCyclePositions : sur "Spire" et
-			-- "Dragon" (les deux FarRangeAttacks a portee), teleporte en boucle
-			-- entre ces 4 coins d'un niveau inferieur de l'arene (~35 studs sous la
-			-- hauteur de combat), mesures sur le script de reference - a 20 Hz (2x
-			-- le rythme mesure, voir M.attachTo), suite a un retour d'usage reel ou
-			-- le rythme mesure (10 Hz) laissait encore passer des degats.
+			-- section Grip du main loop.
+			--
+			-- dodgeCyclePositions : les 4 coins entre lesquels on cycle pendant
+			-- "Spire" et "Dragon" (les deux FarRangeAttacks a portee). X/Z releves
+			-- au sniffer sur le script de reference.
+			--
+			-- HAUTEUR = 336.92, celle du script de reference. NE PAS remonter.
+			--
+			-- Ca a ete essaye a 355, sur un raisonnement pourtant solide : les
+			-- pics de sol du Spire ("WormBranch") culminent a 337-341, donc 336.92
+			-- est dedans, et 355 tombe dans le creneau libre entre eux et la
+			-- hitbox du Dragon (372-373). En jeu, resultat inverse : nettement
+			-- PLUS de degats a 355 qu'a 336.92, deux essais de suite.
+			--
+			-- L'explication la plus probable est que la hauteur ne sert pas a
+			-- sortir de la portee du hazard mais a sortir de la zone que le
+			-- serveur considere comme touchee - et que les coins a 336.92 sont
+			-- justement hors de cette zone, quoi qu'en dise la geometrie des
+			-- pics. A ne pas retoucher sans mesure contradictoire.
 			["Wooden Golem"] = {
 				attachOffset = Vector3.new(0, 9, 0),
 				rewardsModel = "WoodenGolemRewards",
@@ -4134,7 +4197,21 @@ do
 		-- hudHp/hudHpMax : derniers PV pousses dans le HUD, memorises pour que
 		-- M.setHudState puisse reafficher la meme valeur dans la barre d'etat du
 		-- menu sans que l'appelant ait a les repasser.
-		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
+		-- dodgeUntil : instant (os.clock) jusqu'auquel on reste en esquive, arme
+		-- au DEBUT de l'animation d'attaque - voir DODGE_WINDOW_SECONDS et
+		-- M.isDodging.
+		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
+
+		-- Duree pendant laquelle on reste en esquive, comptee depuis le DEBUT de
+		-- l'animation d'attaque (pas depuis sa fin). Les degats arrivent bien
+		-- apres que l'animation soit terminee, avec des delais tres reguliers
+		-- mesures au sniffer :
+		--   Spire  -> le coup tombe a t+1.35, +1.40, +1.40 s
+		--   Dragon -> le coup tombe a t+3.87, +3.94 s
+		-- Se caler sur la fin de l'animation (+1s) ne couvrait donc pas le
+		-- Dragon : on etait deja revenu au contact quand le coup partait.
+		-- 4.5s laisse une marge d'une demi-seconde apres le plus tardif observe.
+		local DODGE_WINDOW_SECONDS = 4.5
 		local M = {}
 
 		function M.getDataEvent()
@@ -4759,9 +4836,15 @@ do
 			return boss:FindFirstChild("HumanoidRootPart") or boss.PrimaryPart or boss:FindFirstChild("Head")
 		end
 
+		-- GetDescendants et pas GetChildren : la hierarchie n'est pas la meme
+		-- partout. Chez la plupart des boss (Manda, Tairock...) les TrinketSpawn
+		-- sont des enfants directs du modele de recompenses, mais chez le Wooden
+		-- Golem ils sont ranges dans DEUX sous-Model intermediaires. Avec
+		-- GetChildren on n'en trouvait aucun, donc M.collectLoot repartait
+		-- aussitot (#spawns == 0 -> "done") sans jamais looter, et en silence.
 		function M.getTrinketSpawns(rewards)
 			local spawns = {}
-			for _, part in ipairs(rewards:GetChildren()) do
+			for _, part in ipairs(rewards:GetDescendants()) do
 				if part:IsA("BasePart") and part.Name:match("^TrinketSpawn") then
 					table.insert(spawns, part)
 				end
@@ -4777,11 +4860,17 @@ do
 		-- le loot de CE rewardsModel (confirme en live via Potassium : items
 		-- "Spark Gem"/"Life Up Fruit"/etc, chacun avec Pickupable/Active/ID/
 		-- ObjectValue).
+		-- IsDescendantOf et pas "Parent == rewards" : meme raison que dans
+		-- M.getTrinketSpawns. Le TrinketSpawn vise par l'ObjectValue peut etre
+		-- range dans un sous-Model (Wooden Golem), auquel cas son Parent n'est
+		-- pas le modele de recompenses mais le sous-Model - la comparaison
+		-- directe echouait et aucun item n'etait jamais reconnu.
+		-- IsDescendantOf couvre aussi le cas plat des autres boss.
 		function M.findRewardItems(rewards)
 			local items = {}
 			for _, obj in ipairs(workspace:GetChildren()) do
 				local link = obj:FindFirstChild("ObjectValue")
-				if obj:FindFirstChild("Pickupable") and link and link.Value and link.Value.Parent == rewards then
+				if obj:FindFirstChild("Pickupable") and link and link.Value and link.Value:IsDescendantOf(rewards) then
 					table.insert(items, obj)
 				end
 			end
@@ -4822,7 +4911,15 @@ do
 		function M.collectLoot(config)
 			if not (config and config.rewardsModel) then return "done" end
 			local rewards = workspace:FindFirstChild(config.rewardsModel)
-			if not rewards then return "done" end
+			if not rewards then
+				-- Le nommage de ces modeles est irregulier cote jeu
+				-- ("ChakraKnightRewards" sans espace mais "Hyuga BossRewards"
+				-- avec) : un nom mal orthographie dans BOSS_CONFIGS rendait la
+				-- phase de loot silencieusement inoperante, indiscernable d'un
+				-- "il n'y avait rien a ramasser". On le dit maintenant.
+				notify("Loot impossible : aucun modele '" .. config.rewardsModel .. "' dans workspace.", "error")
+				return "done"
+			end
 
 			local character = LocalPlayer.Character
 			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -5016,12 +5113,21 @@ do
 		-- marchait deja (juste un aller-retour de plus, invisible en jeu).
 		local GRIP_APPROACH_OFFSET = Vector3.new(0, 3, 0)
 
+		-- Seule source de verite pour "est-on en train d'esquiver ?" : soit une
+		-- animation d'esquive joue encore, soit on est dans la marge gardee juste
+		-- apres (DODGE_HOLD_SECONDS). Tout le reste du module doit passer par ici
+		-- plutot que de lire state.dodging directement, sinon la marge est ignoree.
+		function M.isDodging()
+			return state.dodgeActiveCount > 0 or os.clock() < state.dodgeUntil
+		end
+
 		function M.attachTo(boss, config)
 			M.setAttachedPhysics(true)
 			state.attached = true
 			M.ensureHud()
 			state.dodging = false
 			state.dodgeActiveCount = 0
+			state.dodgeUntil = 0
 			state.gripping = false
 
 			-- dodgeAnimationIds (voir BOSS_CONFIGS, ex: Chakra Knight) : bascule
@@ -5053,6 +5159,11 @@ do
 						if not matched then return end
 						state.dodgeActiveCount = state.dodgeActiveCount + 1
 						state.dodging = true
+						-- La fenetre part d'ICI, du debut de l'animation : c'est le
+						-- seul repere temporel fiable pour les degats (voir
+						-- DODGE_WINDOW_SECONDS). Un nouveau declenchement pendant une
+						-- esquive en cours repousse l'echeance, jamais ne la raccourcit.
+						state.dodgeUntil = math.max(state.dodgeUntil, os.clock() + DODGE_WINDOW_SECONDS)
 						-- dodgeCyclePositions (ex: Wooden Golem) : declenche aussi le Sub
 						-- (M.trySubstitute, jutsu de substitution - voir plus haut) DES LE
 						-- DEBUT du dodge, en plus du cyclage ancre. M.trySubstitute est
@@ -5071,6 +5182,9 @@ do
 						stoppedConn = animTrack.Stopped:Connect(function()
 							state.dodgeActiveCount = math.max(0, state.dodgeActiveCount - 1)
 							state.dodging = state.dodgeActiveCount > 0
+							-- Rien a faire de plus ici : c'est state.dodgeUntil,
+							-- arme au DEBUT de l'animation, qui decide quand on
+							-- revient au contact (voir M.isDodging).
 							stoppedConn:Disconnect()
 						end)
 					end)
@@ -5096,33 +5210,33 @@ do
 
 				-- dodgeCyclePositions (ex: Wooden Golem, Spire/Dragon) : contrairement a
 				-- dodgeOffset (relatif au boss), ce sont des positions ABSOLUES fixes de
-				-- l'arene. Cycle a 10 Hz (rythme mesure sur le script de reference) -
-				-- le doublement a 20 Hz teste entre-temps n'etait pas le vrai probleme
-				-- (voir Anchored ci-dessous), revenu a 10 Hz.
+				-- l'arene. Cycle a 10 Hz (rythme mesure sur le script de reference).
 				--
-				-- Anchored=true specifiquement ici (jamais pour les autres cas) :
-				-- confirme en live que sans ca, on prenait quand meme des degats
-				-- pendant le cycle - les positions loggees montraient une derive
-				-- hors des 4 coins prevus entre deux corrections (ex: Z=-2962.69,
-				-- jamais une des 4 valeurs configurees), signe qu'une force externe
-				-- (knockback/pull de Spire/Dragon) deplace le personnage entre deux
-				-- frames malgre le CFrame+AssemblyLinearVelocity=zero. Un rootPart
-				-- Anchored est totalement immunise aux forces physiques, ce qui
-				-- elimine cette derive. Desanchore des la fin du dodge (sinon casse
-				-- le hover normal, qui repose sur la gravite/collision comme les
-				-- autres boss).
+				-- SURTOUT : NE PAS ancrer le rootPart ici. Ca a ete essaye - la
+				-- derive hors des 4 coins disparaissait bien - mais le sniffer a
+				-- montre que c'etait le remede pire que le mal :
+				--   nous, anch=true  -> -22, -29, -21 PV sur trois attaques
+				--   reference, anch=false -> 0, 0, -10 PV, memes coins, meme cadence
+				-- Un HumanoidRootPart ancre n'est plus simule par la physique, donc
+				-- le client cesse de repliquer sa position : le serveur continue de
+				-- nous croire la ou on etait avant, pres du boss, en pleine zone
+				-- d'effet. Le cyclage devient purement visuel pendant que le serveur
+				-- applique les degats sur l'ancienne position. Sans ancrage, la
+				-- replication suit et le serveur nous voit vraiment dans le coin.
+				-- (Verifie aussi : les degats ne viennent PAS des pics de sol -
+				-- aucun WormBranch n'est apparu pendant ces trois attaques.)
+				local dodging = M.isDodging()
 				local targetPosition
-				if state.dodging and config.dodgeCyclePositions then
+				if dodging and config.dodgeCyclePositions then
 					local positions = config.dodgeCyclePositions
 					local index = (math.floor(os.clock() * 10) % #positions) + 1
 					targetPosition = positions[index]
-					rootPart.Anchored = true
 				else
-					local offset = state.gripping and GRIP_APPROACH_OFFSET or (state.dodging and config.dodgeOffset) or config.attachOffset
+					local offset = state.gripping and GRIP_APPROACH_OFFSET or (dodging and config.dodgeOffset) or config.attachOffset
 					targetPosition = anchor.Position + offset
-					if rootPart.Anchored then
-						rootPart.Anchored = false
-					end
+				end
+				if rootPart.Anchored then
+					rootPart.Anchored = false
 				end
 				rootPart.CFrame = CFrame.new(targetPosition) * ATTACH_ROTATION
 				rootPart.AssemblyLinearVelocity = Vector3.zero
@@ -5438,12 +5552,14 @@ do
 									local bossAlive = bossHumanoid and bossHumanoid.Health > 0
 									M.setHudState(boss.Name, "None", bossDowned and "Grip" or "Attacking")
 
-									-- not state.dodging : pendant une esquive (voir
+									-- M.isDodging() : pendant une esquive (voir
 									-- dodgeAnimationIds/dodgeOffset dans M.attachTo),
 									-- le personnage est deja loin du boss - continuer
 									-- a tenter M1 dans le vide ne sert a rien et peut
-									-- gener l'esquive elle-meme.
-									if bossAlive and not bossDowned and not state.dodging then
+									-- gener l'esquive elle-meme. Passe par isDodging (et
+									-- pas state.dodging) pour couvrir aussi la marge
+									-- gardee apres la fin de l'animation.
+									if bossAlive and not bossDowned and not M.isDodging() then
 										local ok, canAttack = pcall(canM1)
 										if ok and canAttack then
 											pcall(performM1)
@@ -5850,7 +5966,11 @@ do
 		-- Etat + fonctions regroupes dans deux tables plutot qu'en locals
 		-- separes, pour rester large sur les registres (voir note en tete de
 		-- fichier).
-		local state = { enabled = false, currentTarget = nil, connected = {} }
+		-- listConn / targetConn : connexions qu'on doit pouvoir COUPER nous-memes,
+		-- pas seulement au unload - la liste du jeu est reconstruite a chaque
+		-- respawn et la cible peut changer de personnage. Les garder ici evite
+		-- d'empiler des connexions mortes sur des instances detruites.
+		local state = { enabled = false, currentTarget = nil, connected = {}, listConn = nil, targetConn = nil }
 		local M = {}
 
 		function M.findPlayerByDisplayText(text)
@@ -5864,6 +5984,10 @@ do
 
 		function M.stopSpectating()
 			state.currentTarget = nil
+			if state.targetConn then
+				state.targetConn:Disconnect()
+				state.targetConn = nil
+			end
 			local character = LocalPlayer.Character
 			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 			if humanoid then
@@ -5879,6 +6003,20 @@ do
 			end
 			workspace.CurrentCamera.CameraSubject = humanoid
 			state.currentTarget = player
+
+			-- La cible va mourir tot ou tard : son Humanoid est alors detruit et
+			-- la camera retombe toute seule sur nous, alors que state.currentTarget
+			-- continue de la designer. Sans ce reaccrochage, on ne suivait plus
+			-- rien ET recliquer sur ce joueur appelait stopSpectating (on croyait
+			-- deja le spectate) au lieu de le reprendre.
+			if state.targetConn then state.targetConn:Disconnect() end
+			state.targetConn = player.CharacterAdded:Connect(function(character)
+				if state.currentTarget ~= player then return end
+				local newHumanoid = character:WaitForChild("Humanoid", 10)
+				if newHumanoid and state.currentTarget == player then
+					workspace.CurrentCamera.CameraSubject = newHumanoid
+				end
+			end)
 		end
 
 		function M.getPlayerListFrame()
@@ -5920,12 +6058,39 @@ do
 				task.delay(2, M.hookPlayerList) -- PlayerList pas encore charge, on reessaie
 				return
 			end
+			-- Coupe l'accroche precedente : sur un rebuild du ClientGui elle
+			-- pointe vers une List detruite, et sans ca on empilerait une
+			-- connexion morte de plus a chaque respawn.
+			if state.listConn then state.listConn:Disconnect() end
+			state.connected = {}
 			for _, child in ipairs(listFrame:GetChildren()) do
 				M.hookEntry(child)
 			end
-			track(listFrame.ChildAdded:Connect(M.hookEntry))
+			state.listConn = track(listFrame.ChildAdded:Connect(M.hookEntry))
 		end
 		M.hookPlayerList()
+
+		-- ClientGui a ResetOnSpawn=true (verifie en jeu) : a CHAQUE mort, Roblox
+		-- detruit puis recree tout le ScreenGui, donc la List et notre connexion
+		-- ChildAdded avec. C'est la cause du "le spectate ne marche plus apres
+		-- etre mort" : plus aucune entree n'etait accrochee, cliquer ne faisait
+		-- rien. On se raccroche donc a chaque respawn.
+		track(LocalPlayer.CharacterAdded:Connect(function()
+			if unloaded then return end
+			-- Notre propre mort remet la camera sur notre nouveau personnage :
+			-- l'ancienne cible n'est plus spectate, il faut oublier l'etat sinon
+			-- recliquer dessus la stoppait au lieu de la reprendre.
+			M.stopSpectating()
+			task.wait(1) -- laisse le jeu reconstruire son ClientGui
+			M.hookPlayerList()
+		end))
+
+		-- Cible qui quitte le serveur : meme etat fantome que ci-dessus.
+		track(Players.PlayerRemoving:Connect(function(player)
+			if state.currentTarget == player then
+				M.stopSpectating()
+			end
+		end))
 
 		local SpectateSection = addSection(AutresPage, "Spectate Leaderboard")
 		FEATURE_CONTROLS.AutoSpectateOnClick = addToggleRow(SpectateSection, "Spectate au clic (leaderboard)", Settings.AutoSpectateOnClick, function(value)
