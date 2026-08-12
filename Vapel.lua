@@ -171,17 +171,38 @@ end
 
 if ((getgenv and getgenv()) or _G).__VonChoice == "cancel" then return end
 
--- Le jeu est-il reellement charge ? Sur l'ecran de menu (liste des serveurs),
--- ReplicatedStorage ne contient que Servers et Events : GameManager, Settings
--- et UI n'existent pas encore. Sans ce garde-fou, le script se chargeait a
--- moitie puis mourait sur require(ReplicatedStorage.GameManager) - menu affiche
--- mais Auto Boss, Attach to Back et le bouton de decharge absents, et surtout
--- marque d'instance jamais posee, donc garde anti-double-chargement inoperante.
-if not ReplicatedStorage:FindFirstChild("GameManager") then
-	ReplicatedStorage:WaitForChild("GameManager", 20)
+-- Attendre d'etre VRAIMENT en jeu avant de continuer.
+--
+-- Sur l'ecran de menu (liste des serveurs, bouton Continue), ReplicatedStorage
+-- ne contient que Servers et Events : GameManager, Settings et UI n'existent pas
+-- encore. Sans cette attente, le script se chargeait a moitie puis mourait sur
+-- require(ReplicatedStorage.GameManager) - menu affiche mais Auto Boss, Attach
+-- to Back et bouton de decharge absents, et marque d'instance jamais posee, donc
+-- garde anti-double-chargement inoperante.
+--
+-- On attend l'ETAT DU MONDE plutot que d'accrocher le bouton Continue : le nom
+-- ou la structure d'un bouton peut changer a la prochaine mise a jour, la
+-- presence de GameManager et de nos Settings non. Il faut les DEUX - GameManager
+-- arrive avec la replication, nos Settings seulement quand le serveur nous fait
+-- reellement entrer.
+--
+-- 180 s : large, parce que c'est le cas normal apres un server hop (on arrive
+-- sur le menu et le joueur met le temps qu'il veut a cliquer Continue). Le
+-- script attend simplement dans son coin.
+do
+	local deadline = os.clock() + 180
+	while os.clock() < deadline do
+		local settings = ReplicatedStorage:FindFirstChild("Settings")
+		if ReplicatedStorage:FindFirstChild("GameManager")
+			and settings and settings:FindFirstChild(LocalPlayer.Name)
+			and LocalPlayer.Character then
+			break
+		end
+		task.wait(0.5)
+	end
 end
 if not ReplicatedStorage:FindFirstChild("GameManager") then
-	warn("[Von Client] Jeu pas encore charge (GameManager absent) - relance le script une fois en partie.")
+	warn("[Von Client] Toujours pas en partie apres 3 minutes - relance le script une fois dans le monde.")
 	return
 end
 
@@ -8127,8 +8148,22 @@ do
 	-- La source vient de GitHub, pas du disque : c'est le seul point fixe qui
 	-- survit a un changement de serveur. Corollaire a garder en tete - c'est le
 	-- DERNIER COMMIT POUSSE qui sera relance, pas un build local non pousse.
+	-- Le code en file attend lui aussi d'etre en jeu AVANT de telecharger quoi
+	-- que ce soit : apres un hop on arrive sur l'ecran de menu, et injecter la
+	-- avant d'avoir clique Continue laissait un script a moitie charge.
 	local QUEUED = [==[
-task.wait(2)
+local RS = game:GetService("ReplicatedStorage")
+local plr = game:GetService("Players").LocalPlayer
+local deadline = os.clock() + 180
+while os.clock() < deadline do
+	local settings = RS:FindFirstChild("Settings")
+	if RS:FindFirstChild("GameManager")
+		and settings and settings:FindFirstChild(plr.Name)
+		and plr.Character then
+		break
+	end
+	task.wait(0.5)
+end
 local ok, prefs = pcall(function()
 	return game:GetService("HttpService"):JSONDecode(readfile("von_client/prefs.json"))
 end)
