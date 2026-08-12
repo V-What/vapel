@@ -331,6 +331,30 @@ local DEFAULT_FEATURES = {
 	PanicHealEnabled = true,
 	PanicHealThreshold = 30,
 	NotifyLootEnabled = false,
+	-- HUD permanent (page Visuels > HUD)
+	HudSenseActive = true,
+	HudSenseOwners = true,
+	HudNearest = true,
+	-- Attach to Back : studs SOUS la cible. Seule la distance est persistee, la
+	-- cible ne l'est pas - un nom de joueur n'a de sens que sur le serveur courant.
+	AttachBackDistance = 8,
+	AttachBackLead = 120, -- anticipation en ms appliquee a la vitesse de la cible
+	AttachBackHeavy = true,
+	-- false = sous la cible (defaut), true = derriere son dos. Bascule a chaud.
+	AttachBackBehind = false,
+	AttachBackDodge = true,
+	AttachBackDodgeDrop = 60, -- studs sous la cible pendant l'esquive
+	AttachBackAutoGrip = true,
+	-- Garde Auto. Le toggle maitre reste a false (usage manuel) ; les deux
+	-- suivants la prennent et la rendent automatiquement pendant qu'Auto Boss
+	-- ou Attach to Back tournent.
+	AutoBlockEnabled = false,
+	-- Bridage du combo pour proteger la garde. Actif par defaut car sans lui la
+	-- garde ne tient que 48%% du temps (mesure : le finisher s'auto-stunne ~2 s,
+	-- et le stun tue la garde cote serveur). Le prix mesure est -31%% de coups
+	-- acceptes. Qui active la garde veut qu'elle tienne ; decocher rend les
+	-- degats pleins et une garde intermittente.
+	AutoBlockNoFinisher = true,
 }
 
 local Settings = {}
@@ -498,10 +522,53 @@ end
 -- Empile les lignes actives (PV / Distance / Chakra / Blood) juste sous le
 -- nom, dans cet ordre fixe, sans laisser de trou pour celles masquees ou
 -- sans donnee (ex: Chakra/Blood introuvables sur un autre joueur si Backpack
--- ne replique pas). CurrentSkill (orange, ex: "Water Dragon", "Chakra Sense",
--- "Dynamic Entry") passe lui AU-DESSUS du nom quand present, lu directement
--- sur ReplicatedStorage.Settings.<joueur>.CurrentSkill (meme champ que
--- ChakraSenseThreat plus bas dans le fichier).
+-- ne replique pas). L'objet en main (orange, ex: "Golden Zabunagi") passe lui
+-- AU-DESSUS du nom quand present.
+--
+-- Cette ligne affichait avant Settings.<joueur>.CurrentSkill, ce qui etait
+-- trompeur : ce champ ne se remplit que PENDANT l'usage d'un sort, il est vide
+-- le reste du temps. Le vrai "ce qu'il tient" se lit sur la hierarchie du
+-- personnage - l'arme equipee est un Model parente HORS du personnage mais
+-- SOUDE a lui. On remonte donc ses Weld/Motor6D jusqu'a une piece exterieure
+-- et on prend le nom de son Model. Releve en jeu : "Golden Zabunagi.Blade",
+-- "Golden Resanagi.Blade".
+--
+-- Plus juste aussi que Settings.<joueur>.CurrentWeapon, qui donne le TYPE de
+-- combat : mesure en direct, un joueur affichait CurrentWeapon = "Fist" alors
+-- qu'il tenait un Golden Zabunagi.
+-- Ce que le joueur a SELECTIONNE en main : arme, objet ou SORT.
+--
+-- Source : <personnage>.FakeHead.skillGUI.skillName, un TextLabel dans un
+-- BillboardGui que le jeu attache a chaque personnage. Releve en direct sur 14
+-- joueurs - "Basalt Stone", "Chidori", "Fruit Summoning", "Golden Asumai",
+-- "Metallic Bow"... items ET sorts, sans distinction.
+--
+-- Le point qui rend la chose exploitable : ce BillboardGui a Enabled = false
+-- chez TOUT LE MONDE. C'est l'ability Sharingan qui le rend visible (voir les
+-- evenements EnableBillboardGui / DisableBillboardGui du client). Mais son
+-- TEXTE est replique en permanence, que la vue soit accordee ou non - on peut
+-- donc le lire sans posseder le Sharingan.
+--
+-- Tout ce que j'avais tente avant (soudures, Settings, attributs, remotes)
+-- echouait sur les sorts parce qu'un sort ne materialise rien : le jeu ne le
+-- publie que par cette etiquette. FakeHead figurait pourtant dans le tout
+-- premier releve d'enfants du personnage - je n'ai simplement jamais regarde
+-- dedans.
+local function heldItemName(character)
+	if not character then return nil end
+
+	local fakeHead = character:FindFirstChild("FakeHead")
+	local gui = fakeHead and fakeHead:FindFirstChild("skillGUI")
+	local label = gui and gui:FindFirstChild("skillName")
+	if label and label.Text ~= "" then
+		return label.Text
+	end
+
+	-- Repli : un vrai Tool Roblox, si le jeu en pose un jour.
+	local tool = character:FindFirstChildWhichIsA("Tool")
+	return tool and tool.Name or nil
+end
+
 local function refreshPlayerLabel(data)
 	local humanoid = data.humanoid
 	if not humanoid then return end
@@ -512,11 +579,9 @@ local function refreshPlayerLabel(data)
 
 	local skillText = ""
 	if FeatureState.ShowCurrentSkill and data.player then
-		local ok, currentSkill = pcall(function()
-			return ReplicatedStorage.Settings[data.player.Name]:FindFirstChild("CurrentSkill")
-		end)
-		if ok and currentSkill and currentSkill.Value ~= "" then
-			skillText = currentSkill.Value
+		local ok, held = pcall(heldItemName, data.player.Character)
+		if ok and held then
+			skillText = held
 		end
 	end
 
@@ -3038,13 +3103,18 @@ function MenuChrome.closeDrops(except)
 	end
 end
 
-local function addDropdownRow(content, text, options, default, onChange)
+-- dynamic = liste dont le contenu change en cours de partie (ex: les joueurs du
+-- serveur, pour Attach to Back). Deux consequences : la barre de recherche est
+-- forcee (buildDropList tranche une fois pour toutes a la construction d'apres
+-- le nombre d'options - sans ca, une liste commencee a 3 joueurs n'en aurait
+-- jamais alors qu'elle peut monter a 30), et le resultat expose SetOptions.
+local function addDropdownRow(content, text, options, default, onChange, dynamic)
 	local selected = default or options[1]
 
 	local Holder, MainButton, ValueLabel, Chevron = buildDropHead(content, text, tostring(selected))
 	MenuChrome.track(Holder, text)
 
-	local drop = buildDropList(Holder, #options)
+	local drop = buildDropList(Holder, dynamic and DROP_SEARCH_FROM or #options)
 	local buttons = {}
 
 	local function close()
@@ -3070,20 +3140,27 @@ local function addDropdownRow(content, text, options, default, onChange)
 		if drop.IsOpen() then drop.Open(visibleCount()) end
 	end
 
-	for _, option in ipairs(options) do
-		local OptButton = buildDropOption(drop.Scroll, tostring(option))
-		table.insert(buttons, OptButton)
-		if option == selected then Skin.paint(OptButton, { TextColor3 = "Accent" }) end
-		OptButton.MouseButton1Click:Connect(function()
-			selected = option
-			ValueLabel.Text = tostring(selected)
-			for _, other in ipairs(buttons) do
-				Skin.paint(other, { TextColor3 = other == OptButton and "Accent" or "SubText" })
-			end
-			close()
-			if onChange then onChange(selected) end
-		end)
+	local function build(list)
+		for _, btn in ipairs(buttons) do
+			btn:Destroy()
+		end
+		table.clear(buttons)
+		for _, option in ipairs(list) do
+			local OptButton = buildDropOption(drop.Scroll, tostring(option))
+			table.insert(buttons, OptButton)
+			if option == selected then Skin.paint(OptButton, { TextColor3 = "Accent" }) end
+			OptButton.MouseButton1Click:Connect(function()
+				selected = option
+				ValueLabel.Text = tostring(selected)
+				for _, other in ipairs(buttons) do
+					Skin.paint(other, { TextColor3 = other == OptButton and "Accent" or "SubText" })
+				end
+				close()
+				if onChange then onChange(selected) end
+			end)
+		end
 	end
+	build(options)
 
 	if drop.Search then
 		drop.Search:GetPropertyChangedSignal("Text"):Connect(applyDropFilter)
@@ -3102,13 +3179,25 @@ local function addDropdownRow(content, text, options, default, onChange)
 
 	-- Met a jour la valeur affichee sans passer par un clic (utilise par le
 	-- chargement de config) ; declenche quand meme onChange pour appliquer l'effet.
-	local function set(newValue)
+	-- silent = true : affichage seul, sans onChange - pour les mises a jour dont
+	-- l'effet est DEJA applique (ex: Attach to Back qui perd sa cible et remet
+	-- l'en-tete a "(aucun)"), ou onChange relancerait ce qu'on vient d'arreter.
+	local function set(newValue, silent)
 		selected = newValue
 		ValueLabel.Text = tostring(selected)
-		if onChange then onChange(selected) end
+		if onChange and not silent then onChange(selected) end
 	end
 
-	return { Get = function() return selected end, Set = set, Instance = Holder }
+	-- Remplace toute la liste (voir `dynamic`). La valeur selectionnee n'est PAS
+	-- touchee : c'est a l'appelant de decider si elle est encore valable.
+	local function setOptions(newOptions)
+		build(newOptions)
+		if drop.IsOpen() then
+			applyDropFilter()
+		end
+	end
+
+	return { Get = function() return selected end, Set = set, SetOptions = setOptions, Instance = Holder }
 end
 
 -- Variante "cases a cocher repliables" de addDropdownRow : ne se ferme pas au
@@ -3298,7 +3387,9 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 		if onChange then onChange(value) end
 	end
 
-	return { Get = function() return value end, Set = set }
+	-- Instance : meme convention qu'addDropdownRow, pour pouvoir accrocher un
+	-- tooltip a la ligne (un slider n'a pas de .Row comme les toggles).
+	return { Get = function() return value end, Set = set, Instance = Holder }
 end
 
 local function addLabelRow(content, text)
@@ -3712,7 +3803,7 @@ do
 		-- CurrentSkill (orange, au-dessus du nom) et taille de l'ESP : ESP Lua
 		-- uniquement, aucun des deux n'est envoye a l'overlay Python
 		-- (sendOverlayPacket/writeOverlayData n'y touchent pas).
-		FEATURE_CONTROLS.ShowCurrentSkill = addToggleRow(EspSection, "Afficher Current Skill (au-dessus du nom)", FeatureState.ShowCurrentSkill, function(state)
+		FEATURE_CONTROLS.ShowCurrentSkill = addToggleRow(EspSection, "Afficher l'objet en main (au-dessus du nom)", FeatureState.ShowCurrentSkill, function(state)
 			FeatureState.ShowCurrentSkill = state
 			refreshAllPlayerLabels()
 			Settings.ShowCurrentSkill = state
@@ -3761,6 +3852,150 @@ do
 			setTimeChanger(state)
 			Settings.TimeChangerEnabled = state
 		end)
+	end
+
+	do
+		-- HUD permanent en haut de l'ecran, independant de la fenetre du menu.
+		--
+		-- Trois lignes, chacune activable separement :
+		--   rouge  Chakra Sense ACTIFS : joueurs dont Settings.<nom>.CurrentSkill
+		--          vaut "Chakra Sense" a l'instant present.
+		--   bleu   Chakra Sense POSSEDE : joueurs ayant une entree "Chakra Sense"
+		--          dans ReplicatedStorage.Cooldowns.<nom>. Verifie en jeu : ces
+		--          entrees sont des NumberValue horodates qui PERSISTENT (aucun
+		--          retrait observe sur 15 s d'observation), donc leur presence
+		--          prouve que le joueur a lance le skill au moins une fois -
+		--          c'est une preuve de possession, pas un cooldown en cours.
+		--          Corollaire honnete : quelqu'un qui possede Chakra Sense sans
+		--          l'avoir utilise depuis sa connexion n'y apparait pas.
+		--   blanc  Joueur le plus proche et sa distance.
+		--
+		-- Etat + fonctions dans deux tables plutot qu'en locals separes (limite
+		-- des 200 registres, voir la note en tete de fichier).
+		local state = { rows = {} }
+		local M = {}
+
+		local HudFrame = create("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, 10),
+			Size = UDim2.new(0, 520, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+		}, ScreenGui)
+		create("UIListLayout", {
+			Padding = UDim.new(0, 2),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		}, HudFrame)
+
+		-- Contour noir plutot qu'un fond : lisible sur n'importe quel decor sans
+		-- poser un bandeau opaque en haut de l'ecran.
+		function M.addRow(order, color)
+			local label = create("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 26),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				TextSize = 22,
+				TextColor3 = color,
+				Text = "",
+				Visible = false,
+				LayoutOrder = order,
+			}, HudFrame)
+			create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 2, Transparency = 0.25 }, label)
+			return label
+		end
+
+		state.rows.senseActive = M.addRow(1, Color3.fromRGB(255, 70, 70))
+		state.rows.senseOwners = M.addRow(2, Color3.fromRGB(80, 160, 255))
+		state.rows.nearest = M.addRow(3, Color3.new(1, 1, 1))
+
+		function M.countSenseActive()
+			local settingsFolder = ReplicatedStorage:FindFirstChild("Settings")
+			if not settingsFolder then return 0 end
+			local count = 0
+			for _, player in ipairs(Players:GetPlayers()) do
+				local folder = settingsFolder:FindFirstChild(player.Name)
+				local current = folder and folder:FindFirstChild("CurrentSkill")
+				if current and current.Value == "Chakra Sense" then
+					count = count + 1
+				end
+			end
+			return count
+		end
+
+		function M.countSenseOwners()
+			local cooldowns = ReplicatedStorage:FindFirstChild("Cooldowns")
+			if not cooldowns then return 0 end
+			local count = 0
+			for _, playerFolder in ipairs(cooldowns:GetChildren()) do
+				if playerFolder:FindFirstChild("Chakra Sense") then
+					count = count + 1
+				end
+			end
+			return count
+		end
+
+		function M.nearestPlayer()
+			local character = LocalPlayer.Character
+			local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+			if not myRoot then return nil, 0 end
+			local best, bestDistance = nil, math.huge
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+					if root then
+						local distance = (root.Position - myRoot.Position).Magnitude
+						if distance < bestDistance then
+							best, bestDistance = player, distance
+						end
+					end
+				end
+			end
+			return best, bestDistance
+		end
+
+		function M.refresh()
+			local rows = state.rows
+			rows.senseActive.Visible = Settings.HudSenseActive
+			rows.senseOwners.Visible = Settings.HudSenseOwners
+			rows.nearest.Visible = Settings.HudNearest
+
+			if Settings.HudSenseActive then
+				rows.senseActive.Text = "Chakra Sense actif : " .. M.countSenseActive()
+			end
+			if Settings.HudSenseOwners then
+				rows.senseOwners.Text = "Possede Chakra Sense : " .. M.countSenseOwners()
+			end
+			if Settings.HudNearest then
+				local player, distance = M.nearestPlayer()
+				rows.nearest.Text = player
+					and string.format("%s  -  %d studs", player.Name, math.floor(distance))
+					or "Aucun joueur a proximite"
+			end
+		end
+
+		task.spawn(function()
+			while not unloaded do
+				-- 0.3 s : assez reactif pour une distance qui bouge, assez lache
+				-- pour ne pas rescanner 16 dossiers a chaque frame.
+				pcall(M.refresh)
+				task.wait(0.3)
+			end
+		end)
+
+		local HudSection = addSection(VisualsPage, "HUD")
+		FEATURE_CONTROLS.HudSenseActive = addToggleRow(HudSection, "Chakra Sense actifs", Settings.HudSenseActive, function(value)
+			Settings.HudSenseActive = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.HudSenseActive.Row, "Rouge : joueurs qui ont Chakra Sense actif a cet instant.")
+		FEATURE_CONTROLS.HudSenseOwners = addToggleRow(HudSection, "Possedent Chakra Sense", Settings.HudSenseOwners, function(value)
+			Settings.HudSenseOwners = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.HudSenseOwners.Row, "Bleu : joueurs vus lancer Chakra Sense au moins une fois depuis leur connexion (entree persistante dans Cooldowns). Ceux qui l'ont sans l'avoir utilise n'y sont pas.")
+		FEATURE_CONTROLS.HudNearest = addToggleRow(HudSection, "Joueur le plus proche", Settings.HudNearest, function(value)
+			Settings.HudNearest = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.HudNearest.Row, "Blanc : le joueur le plus proche et sa distance en studs.")
 	end
 
 	--------------------------------------------------------------------------------
@@ -4186,12 +4421,25 @@ do
 				dodgeAnimationIds = { "137738911755203" },
 				dodgeOffset = Vector3.new(0, 60, 0),
 				-- "Club Spin" (la toupie) : on ne s'eloigne pas, on prend juste
-				-- 2 studs de plus le temps qu'elle tourne, puis on redescend
-				-- taper. Animation identifiee en attribuant chaque coup recu a
-				-- l'animation qui le precede : 9656290960 a produit les trois
-				-- coups de -3 releves a offY 11.3, 11.6 et 12.3.
+				-- de la hauteur le temps qu'elle tourne, puis on redescend taper.
+				-- Animation identifiee en attribuant chaque coup recu a
+				-- l'animation qui le precede.
+				--
+				-- 20 et pas 14 : sa portee reelle a ete mesuree deux fois, et
+				-- elle est plus haute qu'elle n'en a l'air. A 12 de base elle
+				-- touchait jusqu'a offY 12.3 ; a 14, elle touchait encore
+				-- jusqu'a 15.6 (7 coups, 37 PV - premiere source de degats du
+				-- combat). 20 laisse ~4 studs de marge au-dessus du plus haut
+				-- coup observe.
 				riseAnimationIds = { "9656290960" },
-				riseOffset = Vector3.new(0, 14, 0),
+				riseOffset = Vector3.new(0, 20, 0),
+				-- "SpawnLavalightRing" laisse des mobs vivants apres la mort du
+				-- boss. Nom releve en live : "Lavalight Brute" suivi d'un
+				-- identifiant aleatoire (844324, 633247, 567446...), d'ou le
+				-- prefixe. Ils apparaissent par trois, a 26-36 studs.
+				-- On les nettoie avant de ramasser (voir M.clearMobs).
+				clearMobPrefix = "Lavalight Brute",
+				clearMobRadius = 100,
 				lootWaitPosition = Vector3.new(1609.6252, -488.2617, -594.3062),
 			},
 			-- Wooden Golem : toujours present (pas de spawnFloor/spawnEvent -
@@ -4261,7 +4509,7 @@ do
 		-- dodgeUntil : instant (os.clock) jusqu'auquel on reste en esquive, arme
 		-- au DEBUT de l'animation d'attaque - voir dodgeWindowSeconds et
 		-- M.isDodging.
-		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, riseActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
+		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, collide = {}, comboHoldSince = nil, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, riseActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
 
 		-- Valeur par defaut : 0, c'est-a-dire "on esquive tant que l'animation
 		-- joue, et pas une seconde de plus" - le comportement d'origine, qui
@@ -4708,10 +4956,29 @@ do
 					end
 				end
 			end
-			for _, part in ipairs(character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.CanCollide = not attached
+			-- Collisions : on MEMORISE la valeur d'origine de chaque piece a
+			-- l'accrochage et on la remet telle quelle au relachement.
+			--
+			-- Avant, on remettait bêtement CanCollide=true sur TOUTES les
+			-- pieces - ce qui est faux pour celles qui valent false au repos :
+			-- le HumanoidRootPart (qui se met alors a accrocher le sol) et les
+			-- Handle des accessoires (qui se mettent a heurter le decor). D'ou
+			-- le "je glisse tant que je n'ai pas active/desactive Noclip a la
+			-- main" : ce toggle ne fait que repasser tout a false (setNoclip
+			-- ne restaure rien en s'eteignant), ce qui masquait le probleme.
+			if attached then
+				table.clear(state.collide)
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						state.collide[part] = part.CanCollide
+						part.CanCollide = false
+					end
 				end
+			else
+				for part, original in pairs(state.collide) do
+					if part.Parent then part.CanCollide = original end
+				end
+				table.clear(state.collide)
 			end
 		end
 
@@ -4970,6 +5237,73 @@ do
 		-- tard sans perdre le fil (le loot reste au sol tant qu'il n'est pas
 		-- ramasse, donc rappeler cette fonction plus tard reprend
 		-- naturellement la ou on s'est arrete).
+		-- Nettoie les mobs invoques restes autour du point de loot, AVANT de
+		-- commencer a ramasser. Sur The Ringed Samurai, "SpawnLavalightRing"
+		-- laisse des Lavalight Brute vivants apres la mort du boss : ils
+		-- continuent de taper pendant le ramassage, ce qui fait tomber les PV et
+		-- peut declencher le Panic Heal en pleine phase de loot.
+		--
+		-- Correspondance par PREFIXE et pas par egalite : le jeu colle un
+		-- identifiant aleatoire au nom ("Lavalight Brute844324", "...633247").
+		-- C'est ce detail qui avait fait echouer toutes les detections
+		-- precedentes, qui cherchaient le nom exact.
+		--
+		-- Ne fait rien si le boss n'a pas clearMobPrefix dans sa config.
+		function M.clearMobs(config)
+			local prefix = config.clearMobPrefix
+			local center = config.lootWaitPosition
+			if not (prefix and center) then return end
+
+			local canM1, performM1 = M.getCombatFns()
+			if not (canM1 and performM1) then return end
+
+			local radius = config.clearMobRadius or 100
+			local deadline = os.clock() + 45 -- garde-fou global
+			local killed = 0
+
+			-- Le mob vivant le plus proche du centre, ou nil s'il n'y en a plus.
+			local function nextMob()
+				for _, model in ipairs(workspace:GetChildren()) do
+					if model:IsA("Model") and string.sub(model.Name, 1, #prefix) == prefix then
+						local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+						local hrp = model:FindFirstChild("HumanoidRootPart")
+						if humanoid and humanoid.Health > 0 and hrp
+							and (hrp.Position - center).Magnitude <= radius then
+							return model, humanoid
+						end
+					end
+				end
+				return nil
+			end
+
+			while os.clock() < deadline do
+				if Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive() then return end
+				local mob, humanoid = nextMob()
+				if not mob then break end
+
+				-- Un mob a la fois, jusqu'a sa mort. Timeout par mob pour ne pas
+				-- bloquer tout le loot sur une cible qu'on n'arrive pas a toucher
+				-- (hors de portee, immunisee, deja en train de disparaitre...).
+				local mobDeadline = os.clock() + 15
+				while humanoid.Health > 0 and mob.Parent
+					and os.clock() < mobDeadline and os.clock() < deadline do
+					local character = LocalPlayer.Character
+					local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+					local hrp = mob:FindFirstChild("HumanoidRootPart")
+					if not (rootPart and hrp) then break end
+					M.teleportRootPart(rootPart, hrp.Position + Vector3.new(0, 6, 0))
+					local ok, canAttack = pcall(canM1)
+					if ok and canAttack then pcall(performM1) end
+					task.wait(0.15)
+				end
+				if humanoid.Health <= 0 or not mob.Parent then killed = killed + 1 end
+			end
+
+			if killed > 0 then
+				notify(killed .. " mob(s) elimine(s) avant le loot.", "success")
+			end
+		end
+
 		function M.collectLoot(config)
 			if not (config and config.rewardsModel) then return "done" end
 			local rewards = workspace:FindFirstChild(config.rewardsModel)
@@ -4989,6 +5323,11 @@ do
 
 			local DataEvent = M.getDataEvent()
 			if not DataEvent then return "done" end
+
+			-- D'abord faire le menage : ramasser sous le feu des mobs invoques
+			-- fait fondre les PV pendant qu'on est immobile sur chaque item.
+			-- Ne fait rien pour les boss sans clearMobPrefix.
+			pcall(M.clearMobs, config)
 
 			local spawns = M.getTrinketSpawns(rewards)
 			if #spawns == 0 then return "done" end
@@ -5384,9 +5723,51 @@ do
 			end
 		end
 
+		-- Meme brise que dans Attach to Back : le dernier coup du combo applique
+		-- un Stunned, et le stun met fin a la garde cote serveur. Tant que la
+		-- Garde Auto est tenue, on s'arrete donc a l'avant-dernier coup et on
+		-- laisse le serveur remettre CombatCount a zero.
+		-- COUT : on renonce au finisher, donc a une partie des degats. C'est
+		-- pour ca que ca ne s'applique QUE si la garde est reellement active -
+		-- sans elle, aucune raison de se brider.
+		function M.comboReady()
+			if not (Settings.AutoBlockEnabled and Settings.AutoBlockNoFinisher) then
+				state.comboHoldSince = nil
+				return true
+			end
+			local ok, count = pcall(function()
+				return ReplicatedStorage.Settings[LocalPlayer.Name].CombatCount.Value
+			end)
+			local okLen, length = pcall(function()
+				local combatType = ReplicatedStorage.Settings[LocalPlayer.Name].CombatType.Value
+				return GameManager:getCombatTable(combatType).ComboLength
+			end)
+			if not (ok and okLen and type(length) == "number" and length > 1) then return true end
+			if count < length - 1 then
+				state.comboHoldSince = nil
+				return true
+			end
+			-- Filet : si le compteur ne retombe jamais, on reprend quand meme.
+			state.comboHoldSince = state.comboHoldSince or os.clock()
+			if os.clock() - state.comboHoldSince > 2.5 then
+				state.comboHoldSince = nil
+				return true
+			end
+			return false
+		end
+
+		-- Suspension de la Garde Auto autour du Grip, seul moment ou elle gene :
+		-- le serveur refuse le Grip en garde (data.lua ~L7897). Le reste du temps
+		-- elle tourne toute seule, sans que ce module ait a s'en occuper.
+		function M.suspendGuard(on)
+			local control = FEATURE_CONTROLS.AutoBlockEnabled
+			if control and control.Suspend then control.Suspend(on) end
+		end
+
 		function M.stop()
 			state.enabled = false
 			state.token = state.token + 1
+			M.suspendGuard(false)
 			M.detach()
 			if state.healthConn then
 				state.healthConn:Disconnect()
@@ -5658,7 +6039,7 @@ do
 									-- gener l'esquive elle-meme. Passe par isDodging (et
 									-- pas state.dodging) pour couvrir aussi la marge
 									-- gardee apres la fin de l'animation.
-									if bossAlive and not bossDowned and not M.isDodging() then
+									if bossAlive and not bossDowned and not M.isDodging() and M.comboReady() then
 										local ok, canAttack = pcall(canM1)
 										if ok and canAttack then
 											pcall(performM1)
@@ -5700,6 +6081,11 @@ do
 												-- peu apres pour laisser le Grip s'enclencher avant
 												-- de remonter.
 												state.gripping = true
+												-- Le Grip est refuse en garde
+												-- (data.lua ~L7897) : on la coupe le
+												-- temps de la tentative, et seulement
+												-- ce temps-la.
+												M.suspendGuard(true)
 												task.wait(0.3)
 												local DataEvent = M.getDataEvent()
 												if DataEvent then
@@ -5707,6 +6093,7 @@ do
 												end
 												task.wait(0.5)
 												state.gripping = false
+												M.suspendGuard(false)
 											end
 										end
 									end
@@ -5789,6 +6176,987 @@ do
 		addMultiSelectDropdownRow(AutoBossSection, "Boss", BOSS_NAMES, Settings.AutoBossSelected, function(name, state)
 			Settings.AutoBossSelected[name] = state
 		end)
+	end
+
+	do
+		-- Attach to Back : l'attach d'Auto Boss retourne, sur un JOUEUR choisi
+		-- dans la liste. Sur un boss on se pose au-dessus, face vers le bas ; ici
+		-- on se pose SOUS la cible, face vers le haut. On s'y recolle a CHAQUE
+		-- frame (elle ne peut donc pas nous semer, meme en courant) et on enchaine
+		-- les M1 tant qu'elle est vivante.
+		--
+		-- Points repris tels quels d'Auto Boss, parce qu'ils ont coute cher a
+		-- trouver en live (voir M.attachTo / M.setAttachedPhysics) :
+		--   - PlatformStand=true, reaffirme a chaque frame : sans ca le Humanoid
+		--     part en Freefall et se bat contre le CFrame qu'on pose.
+		--   - JAMAIS Anchored=true : une piece ancree cesse de repliquer, le
+		--     serveur nous croit reste sur place et les coups partent dans le
+		--     vide (c'est exactement le piege du Wooden Golem).
+		--   - canM1/performM1 pris dans l'environnement du LocalScript du jeu :
+		--     ce sont les vraies fonctions d'attaque du client, pas un remote
+		--     reconstruit a la main.
+		--
+		-- Etat + fonctions regroupes dans deux tables plutot qu'en locals separes
+		-- (limite des 200 registres, voir la note en tete de fichier).
+		local state = { enabled = false, target = nil, token = 0, nextHeavy = 0, phase = nil, collide = {}, comboHoldSince = nil, dodgeUntil = 0, skillConn = nil, unblockable = {} }
+		local M = { NONE = "(aucun joueur)", STEP = "VonAttachBack" }
+		-- Anticipation : on vise la ou la cible SERA, pas ou elle est.
+		--
+		-- Deux retards s'additionnent, et AUCUN n'est visible a l'ecran :
+		--   - la position de la cible qu'on voit est deja du passe (son client en
+		--     est proprietaire, elle nous parvient avec la latence) ;
+		--   - notre propre position ne parvient au serveur qu'avec la notre.
+		-- Le serveur, lui, tranche CheckMeleeHit avec ses deux copies a jour :
+		-- le coup peut donc rater alors qu'a l'ecran on est colle. Cible immobile,
+		-- ca ne change rien (vitesse nulle) ; cible qui sprinte, c'est plusieurs
+		-- studs d'erreur. Le plafond evite d'osciller autour d'elle si sa vitesse
+		-- part en pic (projection, dash).
+		local LEAD_MAX = 12
+		-- Miroir EXACT de l'attach d'Auto Boss : la-bas on se pose au-dessus du
+		-- boss avec ATTACH_ROTATION = Angles(-90, 0, 0) (donc face vers le bas) ;
+		-- ici on se pose SOUS la cible, face vers le haut - meme geometrie, signe
+		-- inverse sur les deux termes (hauteur et rotation).
+		local ATTACH_ROTATION = CFrame.Angles(math.rad(90), 0, 0)
+
+		function M.combatFns()
+			local clientGui = PlayerGui:FindFirstChild("ClientGui")
+			local clientScript = clientGui and clientGui:FindFirstChild("LocalScript")
+			if not (clientScript and getsenv) then return nil end
+			local ok, env = pcall(getsenv, clientScript)
+			if not (ok and env) then return nil end
+			return env.canM1, env.performM1
+		end
+
+		function M.playerNames()
+			local names = {}
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					table.insert(names, player.Name)
+				end
+			end
+			table.sort(names)
+			if #names == 0 then
+				table.insert(names, M.NONE)
+			end
+			return names
+		end
+
+		function M.refreshList()
+			local control = FEATURE_CONTROLS.AttachBackTarget
+			if control then
+				control.SetOptions(M.playerNames())
+			end
+		end
+
+		function M.targetParts()
+			local character = state.target and state.target.Character
+			if not character then return nil end
+			return character:FindFirstChild("HumanoidRootPart"), character:FindFirstChildWhichIsA("Humanoid")
+		end
+
+		-- Position ABSOLUE sous la cible, pas relative a son orientation : comme
+		-- pour le boss, on veut un point fixe sous elle qui ne tourne pas quand
+		-- elle tourne (sinon on ferait le tour a chaque fois qu'elle bouge la
+		-- camera, et le serveur nous verrait glisser au lieu de frapper).
+		function M.attachCFrame(targetRoot)
+			-- Esquive en cours : on decroche vers le BAS, loin sous elle. Meme
+			-- principe que le dodgeOffset des boss - on reste accroche a sa
+			-- position (donc on la retrouve tout de suite apres) mais hors de
+			-- portee du sort.
+			if M.isDodging() then
+				local dive = targetRoot.Position - Vector3.new(0, Settings.AttachBackDodgeDrop, 0)
+				return CFrame.new(dive) * ATTACH_ROTATION
+			end
+			local lead = targetRoot.AssemblyLinearVelocity * (Settings.AttachBackLead / 1000)
+			if lead.Magnitude > LEAD_MAX then
+				lead = lead.Unit * LEAD_MAX
+			end
+
+			-- Mode "derriere son dos" : position RELATIVE a son orientation, donc
+			-- on pivote avec elle quand elle tourne la camera. +Z est bien
+			-- l'arriere (le LookVector d'un personnage pointe vers -Z).
+			--
+			-- C'est l'inverse du mode "dessous", volontairement absolu lui : sous
+			-- elle, un point fixe evite de faire le tour a chaque mouvement de
+			-- camera. Dans le dos, au contraire, suivre son orientation est tout
+			-- l'interet - sinon on se retrouverait face a elle des qu'elle se
+			-- retourne.
+			--
+			-- Lu a chaque frame : basculer le toggle en plein combat change la
+			-- position a la frame suivante, sans rien relancer.
+			if Settings.AttachBackBehind then
+				local spot = (targetRoot.CFrame * CFrame.new(0, 0, Settings.AttachBackDistance)).Position + lead
+				return CFrame.lookAt(spot, targetRoot.Position + lead)
+			end
+
+			local spot = targetRoot.Position + lead - Vector3.new(0, Settings.AttachBackDistance, 0)
+			return CFrame.new(spot) * ATTACH_ROTATION
+		end
+
+		-- Attaque lourde. Le client la declenche par HeavyAttack() (data.lua
+		-- ~L3852), mais c'est une fonction LOCALE de son LocalScript : getsenv ne
+		-- la voit pas, contrairement a canM1/performM1 qui sont globales. On refait
+		-- donc ce qui compte cote serveur - le FireServer("CheckMeleeHit", ...,
+		-- "HeavyAttack") - exactement comme pour le Grip et la vente en masse.
+		-- Tout le reste de HeavyAttack() (animation, BodyVelocity aerien,
+		-- ActionTime) est purement local et ne participe pas aux degats.
+		--
+		-- "Ground" et pas "Air" : le client ne choisit "Air" que s'il tombe ET
+		-- possede le skill "Aerial Heavy Attack" (meme fonction du dump). En
+		-- PlatformStand on n'est ni l'un ni l'autre du point de vue du jeu.
+		--
+		-- Les gardes reprennent celles du dump, lues sur ReplicatedStorage.
+		-- Settings[LocalPlayer.Name] : sans elles le serveur rejette en silence
+		-- (deja constate sur le Grip avec MeleeCooldown).
+		function M.heavyAttack()
+			local events = ReplicatedStorage:FindFirstChild("Events")
+			local dataEvent = events and events:FindFirstChild("DataEvent")
+			if not dataEvent then return false end
+			local ok, blocked = pcall(function()
+				local mine = ReplicatedStorage.Settings[LocalPlayer.Name]
+				return mine.HeavyCooldown.Value or mine.MeleeCooldown.Value
+					or mine.Stunned.Value or mine.Blocking.Value
+					or mine.Gripping.Value ~= "None" or mine.CurrentSkill.Value ~= ""
+			end)
+			if not ok or blocked then return false end
+			dataEvent:FireServer("CheckMeleeHit", "Ground", "HeavyAttack")
+			return true
+		end
+
+		-- Delai avant la prochaine lourde : tire au hasard entre 2.5 et 7 s, pour
+		-- que ca ne tombe pas sur un rythme reconnaissable.
+		function M.heavyDelay()
+			return math.random(25, 70) / 10
+		end
+
+		-- Duree pendant laquelle la lourde "occupe" le personnage, lue dans les
+		-- vraies donnees du jeu plutot que devinee : GameManager:getCombatTable
+		-- (<type de combat equipe>).HeavyAttack.Ground.ActionTime. Elle varie
+		-- selon l'arme (0.38 s a mains nues, 0.22 s sur d'autres tables - voir
+		-- data2.lua ~L700), d'ou la lecture a chaud a chaque coup.
+		-- require est mis en cache par Roblox : pas de cout a le rappeler ici,
+		-- et ca evite un local de plus dans ce bloc.
+		--------------------------------------------------------------------------
+		-- Esquive de spells : on plonge SOUS la cible le temps que le sort passe.
+		--
+		-- Detection : ReplicatedStorage.Settings[<joueur>].CurrentSkill, une
+		-- StringValue ecrite par le serveur avec le nom du sort en cours. C'est
+		-- la meme que le client consulte pour s'interdire d'attaquer pendant un
+		-- sort (canM1, data.lua L6471) - donc une source fiable et deja
+		-- repliquee, pas une detection d'animation a l'aveugle.
+		--
+		-- La liste est faite pour grandir : la cle est le nom EXACT tel que le
+		-- serveur l'ecrit. Les trois premiers sont verifies contre data2.lua
+		-- ("64 Palms" L32586, "128 Palms" L33433, "Vacuum Rotation" L26614).
+		-- A noter : 64 Palms et 128 Palms ont CanBeBlocked = false - la garde
+		-- n'y peut RIEN, l'esquive est le seul recours.
+		--------------------------------------------------------------------------
+		-- Liste explicite : sorts a esquiver MEME s'ils sont blocables. Vacuum
+		-- Rotation en fait partie (CanBeBlocked = true) - bloquer ne suffit pas
+		-- quand ca tape 12 fois de suite.
+		M.DODGE_SKILLS = {
+			["Vacuum Rotation"] = true,
+		}
+
+		-- Tout sort marque CanBeBlocked = false est esquive automatiquement : la
+		-- garde n'y peut RIEN par construction, l'esquive est le seul recours.
+		-- 64 Palms et 128 Palms rentrent dans ce cas, plus 81 autres - donc plus
+		-- besoin de les lister un par un.
+		--
+		-- Sauf ceux-ci : sur les 83 imblocables du jeu, une poignee sont des
+		-- soins, resurrections et transformations, pas des attaques. Plonger 3 s
+		-- parce qu'un adversaire se soigne serait du temps de degats offert.
+		M.DODGE_IGNORE = {
+			["Healing Bond"] = true,
+			["Revival Healing"] = true,
+			["Super Healing Revival"] = true,
+			["Chakra Ressurection"] = true,
+			["Self Purification"] = true,
+			["Susanoo Pose"] = true,
+			["Kotoamatsukami Defend"] = true,
+			["Jinchuriki [Stage 1]"] = true,
+			["Jinchuriki [Stage 2]"] = true,
+		}
+
+		-- Mis en cache : la reponse ne change jamais pour un nom donne, et on
+		-- interroge a chaque sort lance par la cible.
+		function M.isUnblockable(name)
+			local cached = state.unblockable[name]
+			if cached ~= nil then return cached end
+			local ok, value = pcall(function()
+				return require(ReplicatedStorage.GameManager).Skills[name].CanBeBlocked
+			end)
+			local result = ok and value == false
+			state.unblockable[name] = result
+			return result
+		end
+
+		function M.shouldDodge(name)
+			if name == "" or M.DODGE_IGNORE[name] then return false end
+			return M.DODGE_SKILLS[name] == true or M.isUnblockable(name)
+		end
+
+		-- Duree lue dans les donnees du sort plutot que devinee : EndActionAnim
+		-- vaut 2.5 s pour les Palms, 3.25 s pour Vacuum Rotation. Une marge d'une
+		-- seconde couvre le retour au contact.
+		function M.skillDuration(name)
+			local ok, seconds = pcall(function()
+				local skill = require(ReplicatedStorage.GameManager).Skills[name]
+				return skill.EndActionAnim or skill.AbilityTime or skill.OccupiedTime
+			end)
+			if ok and type(seconds) == "number" and seconds > 0 then return seconds + 1 end
+			return 4
+		end
+
+		function M.isDodging()
+			return os.clock() < state.dodgeUntil
+		end
+
+		-- Une seule connexion, sur le dossier Settings du joueur et PAS sur son
+		-- personnage : ce dossier vit dans ReplicatedStorage et survit a ses
+		-- morts, donc rien a re-accrocher quand la cible respawn.
+		function M.watchSkills()
+			if state.skillConn then
+				state.skillConn:Disconnect()
+				state.skillConn = nil
+			end
+			local player = state.target
+			if not player then return end
+			local folder = M.settingsOf(player.Name)
+			local current = folder and folder:FindFirstChild("CurrentSkill")
+			if not current then return end
+			state.skillConn = current:GetPropertyChangedSignal("Value"):Connect(function()
+				if not (state.enabled and Settings.AttachBackDodge) then return end
+				local name = current.Value
+				if not M.shouldDodge(name) then return end
+				-- Jamais raccourcir une esquive en cours : deux sorts enchaines
+				-- doivent prolonger, pas remettre le compteur a la valeur du
+				-- second s'il est plus court.
+				state.dodgeUntil = math.max(state.dodgeUntil, os.clock() + M.skillDuration(name))
+				notify("Esquive : " .. name, "info")
+			end)
+		end
+
+		-- Longueur du combo de l'arme equipee, lue dans les donnees du jeu
+		-- (5 aux poings, 3 ou 6 ailleurs - data2.lua ComboLength).
+		function M.comboLength()
+			local ok, n = pcall(function()
+				local combatType = ReplicatedStorage.Settings[LocalPlayer.Name].CombatType.Value
+				local GameManager = require(ReplicatedStorage.GameManager)
+				return GameManager:getCombatTable(combatType).ComboLength
+			end)
+			if ok and type(n) == "number" and n > 1 then return n end
+			return 5
+		end
+
+		-- Avec la Garde Auto, on s'arrete a l'AVANT-DERNIER coup du combo.
+		--
+		-- Mesure (probe_block2) : au dernier coup, CombatCount retombe a 0 et
+		-- Stunned passe a true - c'est la recuperation de fin de combo. Or le
+		-- stun met fin a la garde cote serveur. En frappant sans repit on la
+		-- perdait donc tous les 5 coups, ce qui la rendait inutile pendant
+		-- l'attach : c'est exactement l'ecart entre "garde allumee a l'arret,
+		-- elle tient" et "garde allumee en attaquant, elle ne sert a rien".
+		--
+		-- Sans Garde Auto, aucune raison de se brider : on rend toujours true.
+		function M.comboReady()
+			if not (Settings.AutoBlockEnabled and Settings.AutoBlockNoFinisher) then
+				state.comboHoldSince = nil
+				return true
+			end
+			local folder = M.settingsOf(LocalPlayer.Name)
+			local count = folder and folder:FindFirstChild("CombatCount")
+			if not count or count.Value < M.comboLength() - 1 then
+				state.comboHoldSince = nil
+				return true
+			end
+			-- Filet de securite : on attend que le serveur remette le compteur a
+			-- zero tout seul, mais si ca n'arrive jamais on reprend quand meme
+			-- plutot que de rester plante a ne plus attaquer du tout.
+			state.comboHoldSince = state.comboHoldSince or os.clock()
+			if os.clock() - state.comboHoldSince > 2.5 then
+				state.comboHoldSince = nil
+				return true
+			end
+			return false
+		end
+
+		-- Attend une fenetre ou la lourde peut REELLEMENT partir, au lieu de tirer
+		-- au hasard et d'abandonner si c'est refuse.
+		--
+		-- C'est le coeur du probleme : le Greatsword a CooldownTime = 0.8 s entre
+		-- deux coups et FinalCooldownTime = 2 s apres le finisher (data2.lua), donc
+		-- en enchainant les M1 le drapeau MeleeCooldown est vrai quasiment tout le
+		-- temps. La lourde etant refusee tant qu'il l'est, l'ancienne version la
+		-- reprogrammait 0.5 s plus tard... pendant lesquelles les M1 le rearmaient.
+		-- Elle ne partait donc presque jamais.
+		--
+		-- Ici on CESSE de frapper (l'appelant ne repasse pas par la branche M1
+		-- tant qu'on est dans cette attente) et on guette la vraie ouverture.
+		function M.heavyWindow(timeout)
+			local deadline = os.clock() + (timeout or 2)
+			while os.clock() < deadline do
+				local folder = M.settingsOf(LocalPlayer.Name)
+				if folder then
+					local ok, blocked = pcall(function()
+						return folder.MeleeCooldown.Value or folder.HeavyCooldown.Value
+							or folder.Stunned.Value or folder.Blocking.Value
+							or folder.CurrentSkill.Value ~= "" or folder.Gripping.Value ~= "None"
+					end)
+					if ok and not blocked then return true end
+				end
+				task.wait(0.05)
+			end
+			return false
+		end
+
+		function M.heavyActionTime()
+			local ok, seconds = pcall(function()
+				local combatType = ReplicatedStorage.Settings[LocalPlayer.Name].CombatType.Value
+				local GameManager = require(ReplicatedStorage.GameManager)
+				return GameManager:getCombatTable(combatType).HeavyAttack.Ground.ActionTime
+			end)
+			if ok and type(seconds) == "number" then return seconds end
+			return 0.4 -- repli : la plus longue des valeurs vues dans le dump
+		end
+
+		--------------------------------------------------------------------------
+		-- Auto Grip : la cible tombe a terre -> on la charge, on l'emmene au Safe
+		-- Spot, on la repose, on grippe.
+		--
+		-- Aucun sniff n'a ete necessaire : les deux remotes sont dans le dump du
+		-- client et n'ont AUCUN argument - c'est le serveur qui choisit la cible
+		-- par proximite.
+		--   Carry : data.lua ~L8794, touche V. Gardes : Occupied, Stunned,
+		--           GripCooldown, Blocking, Knocked, ForceField, CarryCooldown.
+		--           Le meme remote sert a charger ET a reposer (bascule) : le
+		--           client remet u32.Carrying a false juste apres l'avoir tire.
+		--   Grip  : data.lua ~L7896, touche B. Gardes : MeleeCooldown, Occupied,
+		--           Gripping == "None", Stunned, Blocking, Knocked, GripCooldown,
+		--           et surtout Humanoid:GetState() ~= Freefall.
+		-- L'etat se lit sur ReplicatedStorage.Settings[<pseudo>] (ce que le jeu
+		-- appelle GameManager:getSettings) : Carrying est un ObjectValue,
+		-- Gripping une chaine qui vaut "None" au repos, Knocked un booleen.
+		--------------------------------------------------------------------------
+
+		function M.settingsOf(name)
+			local folder = ReplicatedStorage:FindFirstChild("Settings")
+			return folder and folder:FindFirstChild(name)
+		end
+
+		-- UNIQUEMENT le drapeau Knocked, surtout PAS "ragdolled" : ce sont deux
+		-- etats differents et les confondre coupait l'attach bien trop tot.
+		-- Le dump les separe nettement (data.lua ~L12088) :
+		--   "Knocked" -> WalkSpeed = 0, JumpPower = 0, Occupied = true, et ca
+		--                reste ainsi jusqu'a l'evenement "Revive". C'est le vrai
+		--                KO, celui qui attend le Carry/Grip.
+		--   ragdolled -> objet transitoire pose dans le personnage a chaque
+		--                projection/stun. La cible se releve toute seule : elle
+		--                n'a jamais ete carryable.
+		function M.isKnocked(player)
+			local folder = M.settingsOf(player.Name)
+			local knocked = folder and folder:FindFirstChild("Knocked")
+			return knocked ~= nil and knocked.Value == true
+		end
+
+		function M.isCarrying()
+			local folder = M.settingsOf(LocalPlayer.Name)
+			local value = folder and folder:FindFirstChild("Carrying")
+			return value ~= nil and value.Value ~= nil
+		end
+
+		function M.isGripping()
+			local folder = M.settingsOf(LocalPlayer.Name)
+			local value = folder and folder:FindFirstChild("Gripping")
+			return value ~= nil and value.Value ~= "None"
+		end
+
+		-- Gardes communes a Carry et Grip, lues sur nos propres Settings. Les
+		-- ignorer fait rejeter le remote en silence (deja paye sur le Grip du
+		-- boss, ou MeleeCooldown encore actif apres les derniers M1 suffisait a
+		-- tout bloquer sans le moindre message).
+		function M.combatReady()
+			local folder = M.settingsOf(LocalPlayer.Name)
+			if not folder then return false end
+			local ok, blocked = pcall(function()
+				return folder.Stunned.Value or folder.MeleeCooldown.Value or folder.Blocking.Value
+			end)
+			return ok and not blocked
+		end
+
+		function M.fireAction(action)
+			local events = ReplicatedStorage:FindFirstChild("Events")
+			local dataEvent = events and events:FindFirstChild("DataEvent")
+			if not dataEvent then return false end
+			return (pcall(function() dataEvent:FireServer(action) end))
+		end
+
+		-- Teleport "pose au sol" : le Grip est refuse en Freefall (garde explicite
+		-- du client), donc on ancre le temps du saut puis on laisse la physique
+		-- reprendre, plutot que d'ecrire le CFrame en vol.
+		function M.standAt(position)
+			local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if not rootPart then return end
+			local wasAnchored = rootPart.Anchored
+			rootPart.Anchored = true
+			rootPart.CFrame = CFrame.new(position)
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			task.wait()
+			rootPart.Anchored = wasAnchored
+		end
+
+		-- Maintient la position pendant une attente, au lieu d'un simple
+		-- task.wait. Des qu'on a relache PlatformStand on redevient un
+		-- personnage normal : on glisse, on tombe, on se fait bousculer. Or le
+		-- serveur valide Carry et Grip sur la position qu'il a A CE MOMENT-LA,
+		-- pas sur celle qu'on avait en se telportant. Meme logique que le
+		-- holdSafeSpot d'Auto Boss : on ne recorrige qu'au-dela d'une vraie
+		-- derive, pour ne pas se battre contre la physique a chaque frame.
+		function M.holdAt(position, seconds)
+			local deadline = os.clock() + seconds
+			while os.clock() < deadline do
+				local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if rootPart and (rootPart.Position - position).Magnitude > 2 then
+					M.standAt(position)
+				end
+				task.wait(0.05)
+			end
+		end
+
+		function M.waitGrounded()
+			local character = LocalPlayer.Character
+			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+			if not humanoid then return end
+			for _ = 1, 20 do
+				if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then return end
+				task.wait(0.1)
+			end
+		end
+
+		-- Suspension de la Garde Auto le temps de la sequence Carry/Grip : ce sont
+		-- les deux seuls remotes que la garde fait refuser. Partout ailleurs on la
+		-- laisse tourner - elle est autonome, ce module n'a pas a la piloter.
+		function M.suspendGuard(on)
+			local control = FEATURE_CONTROLS.AutoBlockEnabled
+			if control and control.Suspend then control.Suspend(on) end
+		end
+
+		function M.autoGrip()
+			local player = state.target
+			state.phase = "grip"
+			-- Le RenderStep nous maintenait sous la cible : il doit lacher la
+			-- main, sinon il ecrase chaque teleport de la sequence a la frame
+			-- suivante. Et on redevient un personnage normal - PlatformStand
+			-- laisse le jeu en Freefall, ce que le Grip refuse.
+			pcall(function() RunService:UnbindFromRenderStep(M.STEP) end)
+			M.setPhysics(false)
+			-- Carry et Grip sont tous deux refuses en garde (gardes explicites du
+			-- client, et le serveur nous croit bloquants meme si notre drapeau
+			-- local ment). M.stop la rend a chaque sortie de la sequence.
+			M.suspendGuard(true)
+			task.wait(0.3)
+
+			-- Colle au corps : Carry comme Grip sont valides par proximite cote
+			-- serveur. Mesure faite sur le Grip du boss - rejete a 12 studs,
+			-- accepte a ~0.3 - donc on se met litteralement dessus, pas a cote.
+			-- Notre root a la hauteur de son root = nos pieds au niveau des
+			-- siens, donc pose au sol et pas en l'air (le Grip refuse Freefall).
+			for _ = 1, 8 do
+				if M.isCarrying() then break end
+				local targetRoot = M.targetParts()
+				if not targetRoot then break end
+				local spot = targetRoot.Position
+				M.standAt(spot)
+				M.waitGrounded()
+				if M.combatReady() then M.fireAction("Carry") end
+				M.holdAt(spot, 0.4)
+			end
+
+			if not M.isCarrying() then
+				notify("Le serveur a refuse le Carry sur " .. player.Name .. ".", "error")
+				M.disable()
+				return
+			end
+			notify(player.Name .. " sur l'epaule, direction le Safe Spot.", "success")
+
+			teleportToSafeSpot()
+			-- Tenu, pas juste attendu : le temps que la position (et le corps
+			-- porte) se replique, une glissade nous ramenerait ailleurs.
+			M.holdAt(SafeSpotPosition, 0.8)
+			M.waitGrounded()
+
+			-- Meme remote pour reposer : c'est une bascule (voir l'en-tete).
+			M.fireAction("Carry")
+			task.wait(0.5)
+
+			for _ = 1, 12 do
+				if M.isGripping() then break end
+				local targetRoot = M.targetParts()
+				if not targetRoot then break end
+				local spot = targetRoot.Position
+				M.standAt(spot)
+				M.waitGrounded()
+				if M.combatReady() then M.fireAction("Grip") end
+				M.holdAt(spot, 0.5)
+			end
+
+			if M.isGripping() then
+				notify("Grip en cours sur " .. player.Name .. ".", "success")
+			else
+				notify("Grip refuse par le serveur (cooldown ou trop loin).", "error")
+			end
+			M.disable()
+		end
+
+		function M.setPhysics(on)
+			local character = LocalPlayer.Character
+			if not character then return end
+			local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+			local rootPart = character:FindFirstChild("HumanoidRootPart")
+			if humanoid then
+				humanoid.PlatformStand = on
+				if not on then
+					-- PlatformStand=false seul ne reveille pas toujours la machine
+					-- a etats du Humanoid (deja constate sur Auto Boss) : sans ce
+					-- GettingUp on reste couche/glissant apres le detach.
+					pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+				end
+			end
+			-- Ancrage d'une frame au relachement. C'est LE remede au "il faut
+			-- activer puis desactiver Noclip pour que ca reparte" : remettre la
+			-- vitesse a zero ne suffit pas, Roblox reapplique la vitesse
+			-- residuelle des que la locomotion normale reprend et on part en
+			-- glissade. Ancrer bloque la physique le temps de la vider.
+			-- D'autant plus indispensable ici que, contrairement a l'attach du
+			-- boss, on sort de l'attach avec la vitesse de la CIBLE sur le dos
+			-- (voir M.step) : sur un joueur qui sprintait, ce residu est enorme.
+			if rootPart and not on then
+				local wasAnchored = rootPart.Anchored
+				rootPart.Anchored = true
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+				task.wait()
+				rootPart.Anchored = wasAnchored
+			end
+			-- Meme regle que l'attach du boss : on memorise la valeur d'origine
+			-- de chaque piece plutot que de tout remettre a true au relachement.
+			-- HumanoidRootPart et Handle des accessoires valent false au repos ;
+			-- les repasser a true les fait accrocher le sol et le decor, ce qui
+			-- est exactement le "slide" qui ne partait qu'en basculant Noclip.
+			if on then
+				table.clear(state.collide)
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						state.collide[part] = part.CanCollide
+						part.CanCollide = false
+					end
+				end
+			else
+				for part, original in pairs(state.collide) do
+					if part.Parent then part.CanCollide = original end
+				end
+				table.clear(state.collide)
+			end
+		end
+
+		function M.step()
+			-- phase = "grip" : la sequence Auto Grip pilote la position elle-meme
+			-- (elle nous colle au corps puis au Safe Spot), on ne doit surtout pas
+			-- la contredire a chaque frame.
+			if not state.enabled or state.phase then return end
+			local character = LocalPlayer.Character
+			local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+			local targetRoot = M.targetParts()
+			-- Cible morte/en train de respawn : on ne bouge plus, mais on reste
+			-- arme - la boucle de combat decidera d'arreter, pas le RenderStep.
+			if not (myRoot and targetRoot) then return end
+			local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+			if humanoid and not humanoid.PlatformStand then
+				humanoid.PlatformStand = true
+			end
+			if myRoot.Anchored then
+				myRoot.Anchored = false
+			end
+			myRoot.CFrame = M.attachCFrame(targetRoot)
+			-- On RECOPIE la vitesse de la cible au lieu de remettre la notre a
+			-- zero (ce que fait l'attach du boss, et que j'avais repris betement).
+			-- Un boss ne court pas : la mettre a zero ne coutait rien. Sur un
+			-- joueur qui sprinte, ca annonce au serveur "je suis immobile" a
+			-- chaque frame - il extrapole donc notre position entre deux paquets
+			-- comme si on restait sur place pendant qu'elle, elle avance. En lui
+			-- donnant la meme vitesse qu'elle, son extrapolation nous fait suivre
+			-- au lieu de nous figer.
+			myRoot.AssemblyLinearVelocity = targetRoot.AssemblyLinearVelocity
+			myRoot.AssemblyAngularVelocity = Vector3.zero
+		end
+
+		function M.combatLoop(myToken)
+			task.spawn(function()
+				local canM1, performM1 = M.combatFns()
+				if not (canM1 and performM1) then
+					notify("Impossible de recuperer les fonctions de combat (canM1/performM1).", "error")
+					M.disable()
+					return
+				end
+				state.nextHeavy = os.clock() + M.heavyDelay()
+				while state.enabled and state.token == myToken and not unloaded do
+					local targetRoot, targetHumanoid = M.targetParts()
+					-- Cible a terre (en attente de Grip) : on arrete de taper et on
+					-- passe la main a la sequence Carry -> Safe Spot -> Grip. Teste
+					-- AVANT la mort : un joueur a terre est encore vivant, c'est
+					-- justement la fenetre ou le Grip est possible.
+					if Settings.AttachBackAutoGrip and state.target and M.isKnocked(state.target) then
+						task.spawn(M.autoGrip)
+						break
+					end
+					if targetHumanoid and targetHumanoid.Health <= 0 then
+						notify(state.target.Name .. " est mort.", "success")
+						M.disable()
+						break
+					end
+					if targetRoot and not M.isDodging() then
+						if Settings.AttachBackHeavy and os.clock() >= state.nextHeavy then
+							-- On arrete les M1 et on ATTEND une vraie ouverture,
+							-- plutot que de tirer a l'aveugle dans la fenetre morte
+							-- du dernier coup (voir M.heavyWindow).
+							local ok, fired = false, false
+							if M.heavyWindow(2) then
+								ok, fired = pcall(M.heavyAttack)
+							end
+							if ok and fired then
+								-- Pause APRES, le temps de son ActionTime : un M1
+								-- envoye pendant que la lourde se joue l'ecrase
+								-- (le client ne rend la main qu'apres ce delai,
+								-- data.lua ~L3884 - wait(u32.ActionTime)).
+								task.wait(M.heavyActionTime() + 0.15)
+								state.nextHeavy = os.clock() + M.heavyDelay()
+							else
+								-- Refusee (cooldown lourd encore actif) : on
+								-- retente vite plutot que d'attendre un nouveau
+								-- tirage complet.
+								state.nextHeavy = os.clock() + 0.5
+							end
+						elseif M.comboReady() then
+							local ok, canAttack = pcall(canM1)
+							if ok and canAttack then
+								pcall(performM1)
+							end
+						end
+					end
+					task.wait(0.05)
+				end
+			end)
+		end
+
+		function M.start()
+			if not state.target then
+				notify("Choisis d'abord un joueur cible.", "error")
+				return false
+			end
+			-- Les deux features ecrivent la position du personnage a chaque frame :
+			-- les laisser tourner ensemble donnerait un va-et-vient entre le boss
+			-- et le joueur, sans jamais frapper ni l'un ni l'autre.
+			if Settings.AutoBossEnabled then
+				notify("Coupe Auto Boss avant : les deux se battent pour ta position.", "error")
+				return false
+			end
+			local targetRoot = M.targetParts()
+			if not targetRoot then
+				notify(state.target.Name .. " n'a pas de personnage charge.", "error")
+				return false
+			end
+			state.enabled = true
+			state.phase = nil
+			state.token = state.token + 1
+			state.dodgeUntil = 0
+			M.watchSkills()
+			M.setPhysics(true)
+			-- Premier saut a la main : le RenderStep ne prend le relais qu'a la
+			-- frame suivante, et sans ce teleport on traverserait la carte en
+			-- glissant si la cible est loin.
+			local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if myRoot then
+				myRoot.CFrame = M.attachCFrame(targetRoot)
+			end
+			RunService:BindToRenderStep(M.STEP, Enum.RenderPriority.Last.Value, M.step)
+			M.combatLoop(state.token)
+			notify("Attach to Back : " .. state.target.Name .. ".", "success")
+			return true
+		end
+
+		function M.stop()
+			if not state.enabled then return end
+			state.enabled = false
+			state.phase = nil
+			state.token = state.token + 1 -- invalide la boucle de combat en cours
+			pcall(function() RunService:UnbindFromRenderStep(M.STEP) end)
+			if state.skillConn then
+				state.skillConn:Disconnect()
+				state.skillConn = nil
+			end
+			state.dodgeUntil = 0
+			M.suspendGuard(false)
+			M.setPhysics(false)
+		end
+
+		-- Coupe en passant par le toggle, pour que le switch du menu suive quand
+		-- l'arret vient du code (cible morte, cible partie, notre propre mort).
+		function M.disable()
+			local control = FEATURE_CONTROLS.AttachBackEnabled
+			if control then control.Set(false) else M.stop() end
+		end
+
+		track(Players.PlayerAdded:Connect(function()
+			if not unloaded then M.refreshList() end
+		end))
+		track(Players.PlayerRemoving:Connect(function(player)
+			if unloaded then return end
+			if state.target == player then
+				state.target = nil
+				local control = FEATURE_CONTROLS.AttachBackTarget
+				-- silencieux : l'effet est deja applique par le M.disable() qui
+				-- suit, onChange ne ferait que rechoisir une cible fantome.
+				if control then control.Set(M.NONE, true) end
+				notify("La cible a quitte le serveur.", "error")
+				M.disable()
+			end
+			M.refreshList()
+		end))
+		-- Notre propre mort : le personnage est detruit, donc l'attach et le
+		-- PlatformStand avec. Rester "actif" en croyant tenir la cible laisserait
+		-- juste un RenderStep qui tourne dans le vide.
+		track(LocalPlayer.CharacterAdded:Connect(function()
+			if not unloaded and state.enabled then
+				M.disable()
+			end
+		end))
+
+		local AttachBackSection = addSection(AutoPage, "Attach to Back")
+		FEATURE_CONTROLS.AttachBackTarget = addDropdownRow(AttachBackSection, "Cible", M.playerNames(), M.NONE, function(name)
+			local picked = name ~= M.NONE and Players:FindFirstChild(name) or nil
+			state.target = picked
+			-- Changer de cible en plein vol : on redemarre pour repartir sur le
+			-- bon personnage plutot que de rester colle a l'ancien.
+			if state.enabled then
+				M.stop()
+				if picked then M.start() else M.disable() end
+			end
+		end, true)
+		attachTooltip(FEATURE_CONTROLS.AttachBackTarget.Instance, "Liste mise a jour automatiquement quand des joueurs rejoignent ou partent.")
+		addButtonRow(AttachBackSection, "Rafraichir la liste", M.refreshList)
+		FEATURE_CONTROLS.AttachBackEnabled = addToggleRow(AttachBackSection, "Attach to Back", false, function(value)
+			if value then
+				if not M.start() then
+					-- start() a refuse (pas de cible, Auto Boss actif...) : on
+					-- remet le switch a zero, sinon il afficherait "actif" alors
+					-- que rien ne tourne. Set(false) repasse ici, mais M.stop()
+					-- est deja neutre quand state.enabled est faux.
+					FEATURE_CONTROLS.AttachBackEnabled.Set(false)
+				end
+			else
+				M.stop()
+			end
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackEnabled.Row, "Te teleporte SOUS la cible (face vers le haut, l'inverse de l'attach boss), t'y maintient et enchaine les M1 jusqu'a sa mort.")
+		KeybindTool.bindToggle("AttachBackEnabled", "Attach to Back", FEATURE_CONTROLS.AttachBackEnabled)
+		FEATURE_CONTROLS.AttachBackBehind = addToggleRow(AttachBackSection, "Se placer derriere son dos", Settings.AttachBackBehind, function(value)
+			Settings.AttachBackBehind = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackBehind.Row, "Bascule a chaud entre sous la cible (defaut) et derriere son dos. Dans le dos, on pivote avec elle quand elle tourne.")
+		FEATURE_CONTROLS.AttachBackDistance = addSliderRow(AttachBackSection, "Distance a la cible", 1, 15, Settings.AttachBackDistance, 0.5, function(v)
+			Settings.AttachBackDistance = v
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackDistance.Instance, "Studs sous la cible, ou derriere elle selon le mode choisi.")
+		FEATURE_CONTROLS.AttachBackLead = addSliderRow(AttachBackSection, "Anticipation (ms)", 20, 300, Settings.AttachBackLead, 10, function(v)
+			Settings.AttachBackLead = v
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackLead.Instance, "De combien on vise en avance sur une cible qui bouge. A regler autour de ton ping : trop bas on reste derriere, trop haut on la depasse.")
+		FEATURE_CONTROLS.AttachBackHeavy = addToggleRow(AttachBackSection, "Attaque lourde aleatoire", Settings.AttachBackHeavy, function(value)
+			Settings.AttachBackHeavy = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackHeavy.Row, "Glisse une attaque lourde entre les M1, a intervalle tire au hasard (2.5 a 7 s).")
+		FEATURE_CONTROLS.AttachBackAutoGrip = addToggleRow(AttachBackSection, "Auto Grip", Settings.AttachBackAutoGrip, function(value)
+			Settings.AttachBackAutoGrip = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackAutoGrip.Row, "Des que la cible est a terre : on la charge (Carry), on l'emmene au Safe Spot, on la repose et on grippe.")
+		FEATURE_CONTROLS.AttachBackDodge = addToggleRow(AttachBackSection, "Esquiver les spells", Settings.AttachBackDodge, function(value)
+			Settings.AttachBackDodge = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AttachBackDodge.Row, "Plonge sous la cible quand elle lance un sort de la liste (64 Palms, 128 Palms, Vacuum Rotation). Les Palms ont CanBeBlocked=false : la garde n'y peut rien.")
+		FEATURE_CONTROLS.AttachBackDodgeDrop = addSliderRow(AttachBackSection, "Plongeon d'esquive (studs)", 20, 150, Settings.AttachBackDodgeDrop, 5, function(v)
+			Settings.AttachBackDodgeDrop = v
+		end)
+	end
+
+	do
+		-- Garde Auto : rester en garde cote serveur tout en continuant a frapper.
+		-- Feature autonome expres (pas rattachee a Attach to Back ni a Auto Boss) :
+		-- elle se combine avec n'importe quoi, y compris le jeu a la main.
+		--
+		-- Le blocage vit a DEUX endroits independants, mesure en jeu :
+		--   - cote serveur, via DataFunction:InvokeServer("Block") / ("EndBlock").
+		--     C'est le seul qui compte pour les degats.
+		--   - cote client, via Settings[<pseudo>].Blocking, un simple BoolValue
+		--     que canM1 (data.lua L6471) et HeavyAttack (L3854) consultent pour
+		--     refuser de partir. Ce BoolValue est ECRIVABLE depuis le client -
+		--     verifie en live : on ecrit true, on relit true. Le client du jeu se
+		--     l'ecrit d'ailleurs lui-meme AVANT de demander l'accord au serveur.
+		-- Donc : on demande la garde au serveur, et on remet le drapeau local a
+		-- false pour que nos propres attaques cessent d'etre refusees.
+		--
+		-- Mesure qui valide le principe (probe_block2, phase "en garde") :
+		--   en garde          CombatCount=3  Blocking=true
+		--   .. CombatCount -> 4              <- attaque ACCEPTEE par le serveur
+		--   .. CombatCount -> 5
+		--   !! Blocking -> false             <- auto-stun de fin de combo
+		-- CombatCount est incremente par le SERVEUR a chaque coup accepte : il
+		-- monte pendant la garde, donc le serveur encaisse bien les deux a la fois.
+		-- Le decrochage a 5 n'est pas un anti-triche mais ComboLength = 5 pour les
+		-- poings (data2.lua L746) : la fin de combo applique un Stunned, et le stun
+		-- met fin a la garde. D'ou la reemission periodique ci-dessous.
+		--
+		-- RESTE NON MESURE : que la garde absorbe reellement les degats pendant
+		-- qu'on attaque. Le serveur nous compte bien comme bloquants, mais qu'il
+		-- applique la reduction a ce moment-la n'est pas verifie - il faut se
+		-- faire frapper et comparer les PV. C'est tout l'objet de ce toggle.
+		local state = { enabled = false, token = 0, lastBlock = 0, wasStunned = false, suspended = false }
+		local M = {}
+
+		function M.mine()
+			local folder = ReplicatedStorage:FindFirstChild("Settings")
+			return folder and folder:FindFirstChild(LocalPlayer.Name)
+		end
+
+		function M.dataFunction()
+			local events = ReplicatedStorage:FindFirstChild("Events")
+			return events and events:FindFirstChild("DataFunction")
+		end
+
+		-- Memes gardes que l'attemptBlock du client (data.lua ~L7643) : inutile de
+		-- demander la garde dans un etat ou le serveur la refusera de toute facon.
+		function M.canBlock(mine)
+			local ok, blocked = pcall(function()
+				return mine.Stunned.Value or mine.Knocked.Value
+					or mine.Gripping.Value ~= "None" or mine.BeingGripped.Value
+			end)
+			return ok and not blocked
+		end
+
+		function M.loop(myToken)
+			task.spawn(function()
+				local dataFunction = M.dataFunction()
+				if not dataFunction then
+					notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
+					M.setEnabled(false)
+					return
+				end
+				while state.enabled and state.token == myToken and not unloaded do
+					local mine = M.mine()
+					if mine and mine:FindFirstChild("Blocking") then
+						-- Reemission periodique plutot qu'a la demande : une fois
+						-- le drapeau local remis a false, on ne PEUT PLUS voir le
+						-- serveur le repasser a false de son cote (l'evenement ne
+						-- se declenche que sur un vrai changement de valeur, et il
+						-- vaut deja false chez nous). Impossible donc de detecter
+						-- la fin de garde par observation - on la reprend a
+						-- intervalle regulier, ce qui couvre tous les cas de
+						-- rupture (stun, fin de combo, grip subi).
+						-- Reprise IMMEDIATE a la sortie de stun, en plus du battement
+						-- de 1.5 s. Chaque stun tue la garde cote serveur, et le plus
+						-- frequent de tous est notre propre finisher de combo :
+						-- attendre le prochain battement laissait une fenetre sans
+						-- garde plus longue que la garde elle-meme.
+						local stunned = mine.Stunned.Value
+						if state.wasStunned and not stunned then
+							state.lastBlock = 0
+						end
+						state.wasStunned = stunned
+
+						if not state.suspended and M.canBlock(mine) and os.clock() - state.lastBlock > 1.5 then
+							state.lastBlock = os.clock()
+							pcall(function() dataFunction:InvokeServer("Block") end)
+						end
+						-- Le mensonge local, reaffirme a chaque tour : le serveur
+						-- repasse le drapeau a true a chaque garde accordee, et il
+						-- suffit qu'il soit vrai une fraction de seconde pour que
+						-- canM1 nous refuse un coup.
+						if mine.Blocking.Value == true then
+							mine.Blocking.Value = false
+						end
+					end
+					task.wait(0.2)
+				end
+			end)
+		end
+
+		function M.setEnabled(value)
+			local control = FEATURE_CONTROLS.AutoBlockEnabled
+			if control and control.Get() ~= value then control.Set(value) end
+		end
+
+		function M.start()
+			state.enabled = true
+			state.token = state.token + 1
+			state.lastBlock = 0
+			M.loop(state.token)
+		end
+
+		function M.stop()
+			if not state.enabled then return end
+			state.enabled = false
+			state.token = state.token + 1
+			-- Sortir proprement de la garde cote serveur : sans ce EndBlock on
+			-- resterait bloque a ses yeux (deplacements et skills brides) alors
+			-- que le toggle est eteint, sans aucun moyen de s'en rendre compte.
+			local dataFunction = M.dataFunction()
+			if dataFunction then
+				pcall(function() dataFunction:InvokeServer("EndBlock") end)
+			end
+			local mine = M.mine()
+			if mine and mine:FindFirstChild("Blocking") then
+				mine.Blocking.Value = false
+			end
+		end
+
+		-- Notre mort remet tout a plat cote serveur : on repart d'une garde
+		-- fraiche plutot que de croire en tenir une qui n'existe plus.
+		track(LocalPlayer.CharacterAdded:Connect(function()
+			if not unloaded and state.enabled then state.lastBlock = 0 end
+		end))
+
+		local AutoBlockSection = addSection(AutoPage, "Garde Auto")
+		FEATURE_CONTROLS.AutoBlockEnabled = addToggleRow(AutoBlockSection, "Bloquer en attaquant", Settings.AutoBlockEnabled, function(value)
+			Settings.AutoBlockEnabled = value
+			if value then M.start() else M.stop() end
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoBlockEnabled.Row, "EXPERIMENTAL : tient la garde cote serveur en continuant a frapper. Reste a verifier que les degats sont bien reduits - compare tes PV sur deux coups recus.")
+		KeybindTool.bindToggle("AutoBlockEnabled", "Garde Auto", FEATURE_CONTROLS.AutoBlockEnabled)
+
+		-- Suspension temporaire, SANS toucher au toggle : Carry et Grip sont les
+		-- deux seules actions que la garde fait refuser, et elles durent une
+		-- poignee de secondes. Auto Boss et Attach to Back appellent ceci autour
+		-- de ces sequences, puis rendent la main.
+		--
+		-- Expose comme champ du controle plutot que par un local partage : ca
+		-- traverse les do...end sans ouvrir un registre de plus a la racine
+		-- (voir la note des 200 registres en tete de fichier), et
+		-- applyFeatureSettings n'y touche pas puisqu'il n'appelle que .Set.
+		FEATURE_CONTROLS.AutoBlockEnabled.Suspend = function(on)
+			state.suspended = on
+			if on then
+				local dataFunction = M.dataFunction()
+				if dataFunction then
+					pcall(function() dataFunction:InvokeServer("EndBlock") end)
+				end
+			else
+				state.lastBlock = 0 -- reprise a la premiere occasion, sans attendre le battement
+			end
+		end
+		FEATURE_CONTROLS.AutoBlockNoFinisher = addToggleRow(AutoBlockSection, "Ne pas finir le combo", Settings.AutoBlockNoFinisher, function(value)
+			Settings.AutoBlockNoFinisher = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoBlockNoFinisher.Row, "S'arrete avant le dernier coup du combo, qui s'auto-stunne 2 s et casse la garde. Mesure : garde active 100%% avec, 48%% sans - pour -31%% de coups. Decoche si tu preferes les degats a la garde.")
 	end
 
 	do
@@ -6198,6 +7566,58 @@ do
 			if not value then M.stopSpectating() end
 		end)
 		attachTooltip(FEATURE_CONTROLS.AutoSpectateOnClick.Row, "Clique un joueur dans le leaderboard (Tab) pour le spectate, reclique pour arreter.")
+	end
+
+	do
+		-- Reset Character : appelle le VRAI reset du jeu, pas un bricolage.
+		--
+		-- Le jeu remplace le bouton reset natif de Roblox par le sien
+		-- (data.lua ~L16231) :
+		--     local BindableEvent = Instance.new("BindableEvent")
+		--     BindableEvent.Event:connect(function()
+		--         if DataFunction:InvokeServer("ResetPlayer") then u32.Occupied = true end
+		--     end)
+		--     StarterGui:SetCore("ResetButtonCallback", BindableEvent)
+		-- Donc appuyer sur Echap > Reset revient exactement a invoquer
+		-- "ResetPlayer". C'est ce qu'on fait ici, ce qui evite les approches
+		-- classiques mais fausses dans ce jeu : Humanoid.Health = 0 ou
+		-- BreakJoints() cote client ne se repliquent pas (le serveur garde sa
+		-- propre vue de nos PV), donc elles ne feraient que casser l'affichage
+		-- local sans jamais nous faire reapparaitre.
+		local function resetCharacter()
+			local events = ReplicatedStorage:FindFirstChild("Events")
+			local dataFunction = events and events:FindFirstChild("DataFunction")
+			if not dataFunction then
+				notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
+				return
+			end
+			-- La garde bloque beaucoup d'actions cote serveur : on la rend avant
+			-- de demander, pour ne pas se faire refuser pour une raison qu'on a
+			-- nous-memes creee.
+			pcall(function() dataFunction:InvokeServer("EndBlock") end)
+
+			-- Trois tentatives : le refus est souvent temporaire (Occupied le
+			-- temps d'une animation, cooldown de melee...), pas definitif.
+			for _ = 1, 3 do
+				local ok, result = pcall(function() return dataFunction:InvokeServer("ResetPlayer") end)
+				if ok and result then
+					notify("Reset envoye.", "success")
+					return
+				end
+				task.wait(0.3)
+			end
+
+			-- Le serveur refuse dans certains etats (en combat, Occupied,
+			-- grippe...). On le dit franchement plutot que de forcer une mort :
+			-- une mort dans le vide reste une mort, avec ce que ca implique en
+			-- jeu, alors qu'un reset refuse se retente une seconde plus tard.
+			notify("Le serveur a refuse le reset (reessaie dans un instant).", "error")
+		end
+
+		local ResetSection = addSection(AutresPage, "Reset Character")
+		attachTooltip(addButtonRow(ResetSection, "Reset Character", resetCharacter),
+			"Appelle le vrai reset du jeu (ResetPlayer), celui-la meme que le bouton Echap declenche.")
+		KeybindTool.bind(ResetSection, "ResetCharacter", "Reset Character", nil, resetCharacter)
 	end
 
 	do
