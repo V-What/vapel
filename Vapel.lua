@@ -478,6 +478,8 @@ local DEFAULT_FEATURES = {
 	AutoEquipWeaponEnabled = false,
 	AutoBossEnabled = false,
 	AutoBossPauseOnChakraSense = true,
+	AutoProgPauseOnChakraSense = true,
+	AutoProgQuest = nil,
 	PanicHealEnabled = true,
 	PanicHealThreshold = 30,
 	NotifyLootEnabled = false,
@@ -634,6 +636,10 @@ end
 -- confirme en live), sinon Auto Boss ferait des allers-retours en rafale.
 local ChakraSenseThreat = { lastSeen = -math.huge }
 local CHAKRA_SENSE_GRACE_SECONDS = 8
+-- Anciennete maximale d'un lancement pour compter comme menace. Les entrees de
+-- Cooldowns persistent apres usage : sans ce filtre, un seul Chakra Sense lance
+-- depuis le debut de la partie bloquerait tout indefiniment.
+local SENSE_RECENT_SECONDS = 20
 local function isChakraSenseThreatActive()
 	return os.clock() - ChakraSenseThreat.lastSeen < CHAKRA_SENSE_GRACE_SECONDS
 end
@@ -6455,6 +6461,829 @@ do
 	end
 
 	do
+		-- AutoProg : automatisation de la progression du personnage.
+		--
+		-- Premiere fonction : debloquer tous les Chakra Points. Le flux reproduit
+		-- exactement celui du client (call.lua ~L7499), sniff a l'appui :
+		--     u9:SetAttribute("ChakraUnlockCD", true)
+		--     task.delay(5, function() u9:SetAttribute("ChakraUnlockCD", nil) end)
+		--     if DataFunction:InvokeServer("ChakraPointUnlock", point) == true then
+		--         point.Unlocking.Value = true ; task.wait(2)
+		--         point.Unlocked.Value = true
+		--
+		-- Deux enseignements repris tels quels, et c'est la que se joue la
+		-- discretion :
+		--   - le client s'impose 5 s de cooldown entre deux deblocages. On les
+		--     respecte : enchainer plus vite serait precisement l'anomalie qui
+		--     distingue un script d'un joueur.
+		--   - un point deja Unlocked est ignore, comme le fait le jeu.
+		--
+		-- On se teleporte sur le point avant d'invoquer : le deblocage se fait
+		-- normalement au contact, et le serveur verifie tres probablement la
+		-- distance.
+		--
+		-- Etat + fonctions dans deux tables plutot qu'en locals separes (limite
+		-- des 200 registres, voir la note en tete de fichier).
+		local state = { running = false, token = 0, collide = {} }
+		local M = {}
+
+		-- Hauteur de survol SOUS le point : hors du champ de vision de quelqu'un
+		-- au sol, mais dans la portee d'interaction.
+		--
+		-- NE PAS DESCENDRE PLUS BAS. Le client impose une distance stricte entre
+		-- notre root et le Main du point (call.lua ~L7444) :
+		--     if v389 and v388 < 12 then   -- v388 = distance au point
+		-- A 10 on est dans la fenetre ; au-dela plus aucune interaction n'est
+		-- possible, ni deblocage ni rien.
+		local HOVER_BELOW = 10
+		-- Meme posture que l'attach d'Attach to Back : sous la cible, face vers le
+		-- haut. C'est ce qui garde le personnage hors du champ de vision tout en
+		-- restant a portee.
+		local HOVER_ROTATION = CFrame.Angles(math.rad(90), 0, 0)
+
+		function M.points()
+			local folder = workspace:FindFirstChild("ChakraPoints")
+			return folder and folder:GetChildren() or {}
+		end
+
+		-- Meme precaution que l'attach d'Auto Boss : on memorise la valeur
+		-- d'origine de chaque piece plutot que de tout remettre a true au
+		-- relachement - HumanoidRootPart et Handle d'accessoires valent false au
+		-- repos, et les repasser a true fait accrocher le sol (le fameux "slide"
+		-- qui ne partait qu'en basculant Noclip).
+		function M.setPhysics(on)
+			local character = LocalPlayer.Character
+			if not character then return end
+			local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+			local rootPart = character:FindFirstChild("HumanoidRootPart")
+			if humanoid then
+				humanoid.PlatformStand = on
+				if not on then
+					pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+				end
+			end
+			if rootPart and not on then
+				local wasAnchored = rootPart.Anchored
+				rootPart.Anchored = true
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+				task.wait()
+				rootPart.Anchored = wasAnchored
+			end
+			if on then
+				table.clear(state.collide)
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						state.collide[part] = part.CanCollide
+						part.CanCollide = false
+					end
+				end
+			else
+				for part, original in pairs(state.collide) do
+					if part.Parent then part.CanCollide = original end
+				end
+				table.clear(state.collide)
+			end
+		end
+
+		-- Tient la position en vol pendant toute la duree demandee. On NE PAS
+		-- ancrer : une piece ancree cesse de repliquer, le serveur nous croirait
+		-- reste ailleurs et refuserait l'interaction (lecon du Wooden Golem).
+		function M.hover(position, seconds)
+			local deadline = os.clock() + seconds
+			while os.clock() < deadline and not unloaded do
+				local character = LocalPlayer.Character
+				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+				if rootPart then
+					local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+					if humanoid and not humanoid.PlatformStand then
+						humanoid.PlatformStand = true
+					end
+					if rootPart.Anchored then rootPart.Anchored = false end
+					rootPart.CFrame = CFrame.new(position) * HOVER_ROTATION
+					rootPart.AssemblyLinearVelocity = Vector3.zero
+					rootPart.AssemblyAngularVelocity = Vector3.zero
+				end
+				task.wait(0.05)
+			end
+		end
+
+		-- Les points que le JOUEUR possede deja, lus dans ses donnees serveur.
+		--
+		-- Ne surtout PAS se fier au BoolValue "Unlocked" du workspace : mesure en
+		-- jeu sur un compte qui possedait les 24 points, 14 d'entre eux avaient
+		-- Unlocked = false. C'est un etat de SESSION (le point est-il actif dans
+		-- cette instance de serveur), pas une possession. S'y fier faisait tenter
+		-- 14 deblocages tous refuses - inutile, et c'est exactement le motif
+		-- repetitif qui trahit un script.
+		function M.ownedPoints()
+			local events = ReplicatedStorage:FindFirstChild("Events")
+			local dataFunction = events and events:FindFirstChild("DataFunction")
+			if not dataFunction then return nil end
+			local ok, data = pcall(function() return dataFunction:InvokeServer("GetData") end)
+			if not (ok and type(data) == "table" and type(data.ChakraPoints) == "table") then
+				return nil
+			end
+			local owned = {}
+			for _, name in ipairs(data.ChakraPoints) do
+				owned[tostring(name)] = true
+			end
+			return owned
+		end
+
+		-- Meme comportement EXACT que la pause Chakra Sense d'Auto Boss : on ne
+		-- coupe pas, on suspend tant que la menace dure, puis on reprend.
+		-- NE PAS remettre state.running dans cette condition : ce drapeau
+		-- n'appartient qu'au toggle des Chakra Points. Le bouton "Faire la
+		-- mission" ne le leve jamais, donc la boucle ne tournait pas une seule
+		-- fois et la fonction renvoyait false - runQuest s'arretait avant sa
+		-- premiere requete, sans le moindre message. Chaque appelant surveille
+		-- deja son propre arret via son token.
+		function M.waitWhileWatched(myToken)
+			while state.token == myToken and not unloaded do
+				if not (Settings.AutoProgPauseOnChakraSense and isChakraSenseThreatActive()) then
+					return true
+				end
+				task.wait(0.5)
+			end
+			return false
+		end
+
+		function M.unlockAll()
+			task.spawn(function()
+				state.token = state.token + 1
+				local myToken = state.token
+				local events = ReplicatedStorage:FindFirstChild("Events")
+				local dataFunction = events and events:FindFirstChild("DataFunction")
+				if not dataFunction then
+					notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
+					M.setEnabled(false)
+					return
+				end
+
+				local character = LocalPlayer.Character
+				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+				if not rootPart then
+					notify("Pas de personnage.", "error")
+					M.setEnabled(false)
+					return
+				end
+				local origin = rootPart.CFrame
+
+				local owned = M.ownedPoints()
+				if not owned then
+					notify("Impossible de lire tes donnees joueur (GetData).", "error")
+					M.setEnabled(false)
+					return
+				end
+
+				local todo = {}
+				for _, point in ipairs(M.points()) do
+					local nameValue = point:FindFirstChild("PointName")
+					if nameValue and not owned[nameValue.Value] and point:FindFirstChild("Main") then
+						table.insert(todo, point)
+					end
+				end
+				if #todo == 0 then
+					notify("Tu possedes deja tous les Chakra Points.", "info")
+					M.setEnabled(false)
+					return
+				end
+				notify(#todo .. " Chakra Point(s) a debloquer.", "info")
+
+				M.setPhysics(true)
+				local done = 0
+				for _, point in ipairs(todo) do
+					if not (state.running and state.token == myToken and not unloaded) then break end
+					if not M.waitWhileWatched(myToken) then break end
+
+					local main = point:FindFirstChild("Main")
+					if main then
+						local spot = main.Position - Vector3.new(0, HOVER_BELOW, 0)
+						-- Une seconde de survol avant d'invoquer : le temps que
+						-- notre position se replique, sinon le serveur nous voit
+						-- encore a l'ancien point et refuse.
+						M.hover(spot, 1)
+
+						-- Ancrage APRES le survol, pas avant : la position doit
+						-- d'abord se repliquer, sinon le serveur nous croit encore
+						-- ailleurs (lecon du Wooden Golem). Une fois qu'il nous
+						-- voit au bon endroit et qu'on ne bouge plus, l'ancrage ne
+						-- cache rien - il stabilise juste le personnage pendant
+						-- l'invocation et le cooldown.
+						local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+						if root then root.Anchored = true end
+
+						local ok, result = pcall(function()
+							return dataFunction:InvokeServer("ChakraPointUnlock", point)
+						end)
+						local label = point:FindFirstChild("PointName")
+						label = label and label.Value or point.Name
+						if ok and result == true then
+							done = done + 1
+							notify("Chakra Point debloque : " .. label, "success")
+						else
+							notify("Refuse : " .. label, "error")
+						end
+						-- Cooldown du jeu, respecte a la lettre, passe sur place
+						-- plutot qu'en se deplacant : on reste hors de vue.
+						task.wait(5)
+						if root then root.Anchored = false end
+					end
+				end
+
+				-- Retour au point de depart : on a promene le joueur d'un bout a
+				-- l'autre de la carte, autant le ramener ou il etait.
+				local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if root then root.CFrame = origin end
+				M.setPhysics(false)
+
+				if state.token == myToken then
+					notify(done .. " Chakra Point(s) debloque(s).", done > 0 and "success" or "error")
+					M.setEnabled(false)
+				end
+			end)
+		end
+
+		function M.setEnabled(value)
+			local control = FEATURE_CONTROLS.AutoProgChakraPoints
+			if control and control.Get() ~= value then control.Set(value) end
+		end
+
+		--------------------------------------------------------------------------
+		-- Missions.
+		--
+		-- Mecanique relevee au mouchard sur une quete de livraison faite par un
+		-- script tiers (InnKeeper's Reunion) :
+		--     StartQuest | InnKeeper's Reunion            -> donnees joueur
+		--     newArea | The Catacombs                     (suivi de zone, passif)
+		--     StartQuest | InnKeeper's Reunion            -> donnees joueur
+		--     GetQuestProgress | ... | DontComplete       -> FinishedGood
+		--     etat : {"Progress":"FinishedGood","Completed":true}
+		--
+		-- L'enseignement central : StartQuest sert A LA FOIS a demarrer et a
+		-- rendre. Il n'existe aucun remote de remise separe - le serveur tranche
+		-- selon l'endroit ou on se trouve et l'etat de la quete. Tout le travail
+		-- consiste donc a se rendre au bon PNJ et a rappeler StartQuest.
+		--
+		-- Ou aller : GameManager.NPC[<nom>].Quest porte le nom de la quete, et le
+		-- modele du meme nom dans workspace donne la position. Deux PNJ par quete
+		-- en general - le donneur et le destinataire - sans que les donnees disent
+		-- lequel est lequel. On les visite donc tous, dans l'ordre, en verifiant
+		-- l'etat apres chaque passage : c'est le serveur qui decide.
+		--
+		-- LIMITE ASSUMEE : ca couvre les quetes de dialogue et de livraison. Une
+		-- quete qui exige de tuer ou de ramasser quelque chose restera bloquee en
+		-- Ongoing - l'objectif vit cote serveur et n'est decrit nulle part dans
+		-- les donnees du client. L'echec est visible (notification), pas silencieux.
+		--------------------------------------------------------------------------
+
+		-- TOUS les exemplaires, pas le premier venu.
+		--
+		-- Releve en jeu : sept modeles s'appellent "InnKeeper", disperses sur la
+		-- carte. FindFirstChild n'en rend qu'un, et c'est ce qui faisait echouer
+		-- la mission - on demarrait la quete chez un aubergiste et il ne restait
+		-- personne a qui livrer. Une quete de courrier va justement d'un porteur
+		-- du meme nom a un autre.
+		--
+		-- Tries par distance : on commence par le plus proche, ce qui evite une
+		-- traversee de carte inutile quand le donneur est a cote.
+		function M.questNpcs(questName)
+			local ok, gm = pcall(require, ReplicatedStorage.GameManager)
+			if not (ok and gm and gm.NPC) then return {} end
+
+			local wanted = {}
+			for npcName, data in pairs(gm.NPC) do
+				if type(data) == "table" and data.Quest == questName then
+					wanted[npcName] = true
+				end
+			end
+
+			local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local myPos = root and root.Position
+			local list = {}
+			for _, model in ipairs(workspace:GetChildren()) do
+				if wanted[model.Name] then
+					local part = model:FindFirstChild("HumanoidRootPart")
+						or model:FindFirstChild("Main")
+						or model:FindFirstChildWhichIsA("BasePart", true)
+					if part then
+						table.insert(list, {
+							name = model.Name,
+							position = part.Position,
+							distance = myPos and (part.Position - myPos).Magnitude or 0,
+						})
+					end
+				end
+			end
+			table.sort(list, function(a, b) return a.distance < b.distance end)
+			return list
+		end
+
+		function M.questProgress(dataFunction, questName)
+			local ok, progress, extra = pcall(function()
+				return dataFunction:InvokeServer("GetQuestProgress", questName, "DontComplete")
+			end)
+			if not ok then return nil end
+			return tostring(progress), tostring(extra or "")
+		end
+
+		-- Se place pour interagir avec un PNJ et tente l'appel de dialogue.
+		-- Deux placements essayes dans l'ordre : en survol SOUS lui (discret,
+		-- hors du champ de vision de quelqu'un au sol), puis a cote au niveau du
+		-- sol si le premier ne donne rien. Le seul placement dont on ait une
+		-- preuve de validation est "a cote" - il sert donc de repli.
+		function M.talkTo(dataFunction, questName, position)
+			for _, mode in ipairs({ "dessous", "a cote" }) do
+				local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if not root then return nil end
+				if mode == "dessous" then
+					M.hover(position - Vector3.new(0, HOVER_BELOW, 0), 1.2)
+				else
+					local humanoid = LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+					if humanoid then humanoid.PlatformStand = false end
+					root.CFrame = CFrame.new(position - Vector3.new(0, 0, 6), position)
+					task.wait(1.2)
+				end
+				pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
+				task.wait(0.3)
+				pcall(function() dataFunction:InvokeServer("StartQuest", questName) end)
+				task.wait(0.4)
+				local progress = M.questProgress(dataFunction, questName)
+				if progress and not progress:find("^Start") then
+					return progress
+				end
+			end
+			return M.questProgress(dataFunction, questName)
+		end
+
+		-- Recette corrigee apres mesure.
+		--
+		-- Ce que j'avais conclu trop vite : "StartQuest depuis n'importe ou
+		-- suffit a demarrer". Le serveur enregistre bien la quete en Ongoing
+		-- depuis 257 studs - mais elle ne mene NULLE PART. Balayage complet
+		-- ensuite : les sept aubergistes, a trois placements chacun (jusqu'a
+		-- 1 stud), aucun ne valide la livraison. Une quete demarree sans donneur
+		-- n'a pas de destinataire assigne.
+		--
+		-- On passe donc physiquement chez un PNJ pour PRENDRE la quete, puis chez
+		-- les autres pour la RENDRE. Deux deplacements, comme un joueur.
+		--
+		-- A savoir sur cette quete : UsesOngoing = false. Aucun dialogue ne
+		-- s'ouvre tant qu'elle est en cours - ni pour nous, ni a la main. La
+		-- validation est donc positionnelle, pas conversationnelle.
+		function M.runQuest(questName)
+			task.spawn(function()
+				state.token = state.token + 1
+				local myToken = state.token
+				local events = ReplicatedStorage:FindFirstChild("Events")
+				local dataFunction = events and events:FindFirstChild("DataFunction")
+				if not dataFunction then
+					notify("DataFunction introuvable.", "error")
+					return
+				end
+
+				local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if not root then
+					notify("Pas de personnage.", "error")
+					return
+				end
+				local origin = root.CFrame
+
+				local npcs = M.questNpcs(questName)
+				if #npcs == 0 then
+					notify("Aucun PNJ trouve dans le monde pour cette mission.", "error")
+					return
+				end
+
+				M.setPhysics(true)
+				local finished = false
+				local started = false
+
+				for _, npc in ipairs(npcs) do
+					if state.token ~= myToken or unloaded then break end
+					if not M.waitWhileWatched(myToken) then break end
+
+					local progress = M.talkTo(dataFunction, questName, npc.position)
+					notify(npc.name .. " -> " .. tostring(progress), "info")
+
+					if progress and progress:find("Finished") then
+						finished = true
+						state.lastNpc = state.lastNpc or {}
+						state.lastNpc[questName] = npc.position
+						break
+					end
+					if progress and progress:find("Ongoing") then
+						started = true
+					end
+				end
+
+				local back = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if back then back.CFrame = origin end
+				M.setPhysics(false)
+
+				if finished then
+					notify(questName .. " : terminee.", "success")
+				elseif started then
+					notify(questName .. " : prise mais aucun PNJ ne la valide.", "error")
+				else
+					notify(questName .. " : impossible de la demarrer.", "error")
+				end
+			end)
+		end
+
+		function M.setEnabled(value)
+			local control = FEATURE_CONTROLS.AutoProgChakraPoints
+			if control and control.Get() ~= value then control.Set(value) end
+		end
+
+		--------------------------------------------------------------------------
+		-- Missions.
+		--
+		-- Mecanique relevee au mouchard sur une quete de livraison faite par un
+		-- script tiers (InnKeeper's Reunion) :
+		--     StartQuest | InnKeeper's Reunion            -> donnees joueur
+		--     newArea | The Catacombs                     (suivi de zone, passif)
+		--     StartQuest | InnKeeper's Reunion            -> donnees joueur
+		--     GetQuestProgress | ... | DontComplete       -> FinishedGood
+		--     etat : {"Progress":"FinishedGood","Completed":true}
+		--
+		-- L'enseignement central : StartQuest sert A LA FOIS a demarrer et a
+		-- rendre. Il n'existe aucun remote de remise separe - le serveur tranche
+		-- selon l'endroit ou on se trouve et l'etat de la quete. Tout le travail
+		-- consiste donc a se rendre au bon PNJ et a rappeler StartQuest.
+		--
+		-- Ou aller : GameManager.NPC[<nom>].Quest porte le nom de la quete, et le
+		-- modele du meme nom dans workspace donne la position. Deux PNJ par quete
+		-- en general - le donneur et le destinataire - sans que les donnees disent
+		-- lequel est lequel. On les visite donc tous, dans l'ordre, en verifiant
+		-- l'etat apres chaque passage : c'est le serveur qui decide.
+		--
+		-- LIMITE ASSUMEE : ca couvre les quetes de dialogue et de livraison. Une
+		-- quete qui exige de tuer ou de ramasser quelque chose restera bloquee en
+		-- Ongoing - l'objectif vit cote serveur et n'est decrit nulle part dans
+		-- les donnees du client. L'echec est visible (notification), pas silencieux.
+		--------------------------------------------------------------------------
+
+		-- TOUS les exemplaires, pas le premier venu.
+		--
+		-- Releve en jeu : sept modeles s'appellent "InnKeeper", disperses sur la
+		-- carte. FindFirstChild n'en rend qu'un, et c'est ce qui faisait echouer
+		-- la mission - on demarrait la quete chez un aubergiste et il ne restait
+		-- personne a qui livrer. Une quete de courrier va justement d'un porteur
+		-- du meme nom a un autre.
+		--
+		-- Tries par distance : on commence par le plus proche, ce qui evite une
+		-- traversee de carte inutile quand le donneur est a cote.
+		function M.questNpcs(questName)
+			local ok, gm = pcall(require, ReplicatedStorage.GameManager)
+			if not (ok and gm and gm.NPC) then return {} end
+
+			local wanted = {}
+			for npcName, data in pairs(gm.NPC) do
+				if type(data) == "table" and data.Quest == questName then
+					wanted[npcName] = true
+				end
+			end
+
+			local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local myPos = root and root.Position
+			local list = {}
+			for _, model in ipairs(workspace:GetChildren()) do
+				if wanted[model.Name] then
+					local part = model:FindFirstChild("HumanoidRootPart")
+						or model:FindFirstChild("Main")
+						or model:FindFirstChildWhichIsA("BasePart", true)
+					if part then
+						table.insert(list, {
+							name = model.Name,
+							position = part.Position,
+							distance = myPos and (part.Position - myPos).Magnitude or 0,
+						})
+					end
+				end
+			end
+			table.sort(list, function(a, b) return a.distance < b.distance end)
+			return list
+		end
+
+		function M.questProgress(dataFunction, questName)
+			local ok, progress, extra = pcall(function()
+				return dataFunction:InvokeServer("GetQuestProgress", questName, "DontComplete")
+			end)
+			if not ok then return nil end
+			return tostring(progress), tostring(extra or "")
+		end
+
+		-- Recette etablie par mesure, pas par supposition :
+		--
+		--   1. GetQuestProgress(nom)  puis  StartQuest(nom)
+		--      Demarre la quete depuis N'IMPORTE OU - verifie en jeu a 257 studs
+		--      du PNJ le plus proche. Aucun deplacement n'est necessaire ici.
+		--      GetQuestProgress SANS le drapeau "DontComplete" est l'appel que
+		--      fait le dialogue en s'ouvrant ; c'est lui qui fait avancer l'etat.
+		--      La variante "DontComplete" est une lecture seule (boucle de
+		--      proximite du jeu) et ne complete jamais rien.
+		--
+		--   2. Se rendre chez le PNJ destinataire, puis GetQuestProgress(nom).
+		--      LA, la position compte : repeter les appels a distance laisse la
+		--      quete en Ongoing indefiniment.
+		--
+		-- Comme plusieurs PNJ portent le meme nom (sept "InnKeeper" disperses sur
+		-- la carte) et que rien ne dit lequel est le destinataire, on les essaie
+		-- dans l'ordre en s'arretant au premier qui fait basculer l'etat. Le
+		-- gagnant est memorise pour la fois suivante.
+		function M.runQuest(questName)
+			task.spawn(function()
+				state.token = state.token + 1
+				local myToken = state.token
+				local events = ReplicatedStorage:FindFirstChild("Events")
+				local dataFunction = events and events:FindFirstChild("DataFunction")
+				if not dataFunction then
+					notify("DataFunction introuvable.", "error")
+					return
+				end
+
+				local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if not root then
+					notify("Pas de personnage.", "error")
+					return
+				end
+				local origin = root.CFrame
+
+				if not M.waitWhileWatched(myToken) then return end
+
+				-- Etape 1 : demarrage sur place, sans bouger.
+				pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
+				task.wait(0.3)
+				pcall(function() dataFunction:InvokeServer("StartQuest", questName) end)
+				task.wait(0.4)
+
+				local progress = M.questProgress(dataFunction, questName)
+				if progress and progress:find("Finished") then
+					notify(questName .. " : terminee.", "success")
+					return
+				end
+				if not (progress and progress:find("Ongoing")) then
+					notify(questName .. " : le serveur refuse de la demarrer (" .. tostring(progress) .. ").", "error")
+					return
+				end
+				notify(questName .. " : en cours, recherche du destinataire.", "info")
+
+				-- Etape 2 : livraison. On essaie le PNJ qui a marche la derniere
+				-- fois en premier, puis les autres.
+				local npcs = M.questNpcs(questName)
+				if #npcs == 0 then
+					notify("Aucun PNJ trouve dans le monde pour cette mission.", "error")
+					return
+				end
+				local remembered = state.lastNpc and state.lastNpc[questName]
+				if remembered then
+					table.sort(npcs, function(a, b)
+						local da = (a.position - remembered).Magnitude
+						local db = (b.position - remembered).Magnitude
+						return da < db
+					end)
+				end
+
+				-- Livraison en survol SOUS le PNJ, meme posture que pour les Chakra
+				-- Points : hors du champ de vision de quelqu'un au sol, mais dans
+				-- la portee d'interaction. On s'arrete au PREMIER qui valide, donc
+				-- un seul deplacement dans le cas normal.
+				M.setPhysics(true)
+				local finished = false
+				for _, npc in ipairs(npcs) do
+					if state.token ~= myToken or unloaded then break end
+					if not M.waitWhileWatched(myToken) then break end
+
+					local spot = npc.position - Vector3.new(0, HOVER_BELOW, 0)
+					M.hover(spot, 1.2) -- tenu, le temps que la position se replique
+					pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
+					task.wait(0.4)
+					progress = M.questProgress(dataFunction, questName)
+					notify(npc.name .. " -> " .. tostring(progress), "info")
+					if progress and progress:find("Finished") then
+						finished = true
+						state.lastNpc = state.lastNpc or {}
+						state.lastNpc[questName] = npc.position
+						break
+					end
+				end
+
+				local back = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if back then back.CFrame = origin end
+				M.setPhysics(false)
+				if finished then
+					notify(questName .. " : terminee.", "success")
+				else
+					notify(questName .. " : aucun PNJ n'a valide la livraison.", "error")
+				end
+			end)
+		end
+
+		function M.setEnabled(value)
+			local control = FEATURE_CONTROLS.AutoProgChakraPoints
+			if control and control.Get() ~= value then control.Set(value) end
+		end
+
+		--------------------------------------------------------------------------
+		-- Missions.
+		--
+		-- Mecanique relevee au mouchard sur une quete de livraison faite par un
+		-- script tiers (InnKeeper's Reunion) :
+		--     StartQuest | InnKeeper's Reunion            -> donnees joueur
+		--     newArea | The Catacombs                     (suivi de zone, passif)
+		--     StartQuest | InnKeeper's Reunion            -> donnees joueur
+		--     GetQuestProgress | ... | DontComplete       -> FinishedGood
+		--     etat : {"Progress":"FinishedGood","Completed":true}
+		--
+		-- L'enseignement central : StartQuest sert A LA FOIS a demarrer et a
+		-- rendre. Il n'existe aucun remote de remise separe - le serveur tranche
+		-- selon l'endroit ou on se trouve et l'etat de la quete. Tout le travail
+		-- consiste donc a se rendre au bon PNJ et a rappeler StartQuest.
+		--
+		-- Ou aller : GameManager.NPC[<nom>].Quest porte le nom de la quete, et le
+		-- modele du meme nom dans workspace donne la position. Deux PNJ par quete
+		-- en general - le donneur et le destinataire - sans que les donnees disent
+		-- lequel est lequel. On les visite donc tous, dans l'ordre, en verifiant
+		-- l'etat apres chaque passage : c'est le serveur qui decide.
+		--
+		-- LIMITE ASSUMEE : ca couvre les quetes de dialogue et de livraison. Une
+		-- quete qui exige de tuer ou de ramasser quelque chose restera bloquee en
+		-- Ongoing - l'objectif vit cote serveur et n'est decrit nulle part dans
+		-- les donnees du client. L'echec est visible (notification), pas silencieux.
+		--------------------------------------------------------------------------
+
+		-- TOUS les exemplaires, pas le premier venu.
+		--
+		-- Releve en jeu : sept modeles s'appellent "InnKeeper", disperses sur la
+		-- carte. FindFirstChild n'en rend qu'un, et c'est ce qui faisait echouer
+		-- la mission - on demarrait la quete chez un aubergiste et il ne restait
+		-- personne a qui livrer. Une quete de courrier va justement d'un porteur
+		-- du meme nom a un autre.
+		--
+		-- Tries par distance : on commence par le plus proche, ce qui evite une
+		-- traversee de carte inutile quand le donneur est a cote.
+		function M.questNpcs(questName)
+			local ok, gm = pcall(require, ReplicatedStorage.GameManager)
+			if not (ok and gm and gm.NPC) then return {} end
+
+			local wanted = {}
+			for npcName, data in pairs(gm.NPC) do
+				if type(data) == "table" and data.Quest == questName then
+					wanted[npcName] = true
+				end
+			end
+
+			local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local myPos = root and root.Position
+			local list = {}
+			for _, model in ipairs(workspace:GetChildren()) do
+				if wanted[model.Name] then
+					local part = model:FindFirstChild("HumanoidRootPart")
+						or model:FindFirstChild("Main")
+						or model:FindFirstChildWhichIsA("BasePart", true)
+					if part then
+						table.insert(list, {
+							name = model.Name,
+							position = part.Position,
+							distance = myPos and (part.Position - myPos).Magnitude or 0,
+						})
+					end
+				end
+			end
+			table.sort(list, function(a, b) return a.distance < b.distance end)
+			return list
+		end
+
+		function M.questProgress(dataFunction, questName)
+			local ok, progress, extra = pcall(function()
+				return dataFunction:InvokeServer("GetQuestProgress", questName, "DontComplete")
+			end)
+			if not ok then return nil end
+			return tostring(progress), tostring(extra or "")
+		end
+
+		function M.runQuest(questName)
+			task.spawn(function()
+				state.token = state.token + 1
+				local myToken = state.token
+				local events = ReplicatedStorage:FindFirstChild("Events")
+				local dataFunction = events and events:FindFirstChild("DataFunction")
+				if not dataFunction then
+					notify("DataFunction introuvable.", "error")
+					return
+				end
+
+				local npcs = M.questNpcs(questName)
+				if #npcs == 0 then
+					notify("Aucun PNJ trouve dans le monde pour \"" .. questName .. "\".", "error")
+					return
+				end
+
+				local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if not root then
+					notify("Pas de personnage.", "error")
+					return
+				end
+				local origin = root.CFrame
+				notify(questName .. " : " .. #npcs .. " PNJ a visiter.", "info")
+
+				-- Deux passages au plus : le premier demarre chez le donneur, le
+				-- second rend chez le destinataire. Un troisieme n'apporterait rien.
+				local finished = false
+				for pass = 1, 2 do
+					for _, npc in ipairs(npcs) do
+						if state.token ~= myToken or unloaded then return end
+						if not M.waitWhileWatched(myToken) then return end
+
+						local current = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+						if current then
+							current.CFrame = CFrame.new(npc.position - Vector3.new(0, 0, 6), npc.position)
+							task.wait(1) -- laisse la position se repliquer
+
+							-- L'ordre exact releve sur une partie manuelle :
+							--   GetQuestProgress(nom)              <- SANS DontComplete
+							--   StartQuest(nom)
+							-- La premiere est l'appel que fait le DIALOGUE en
+							-- s'ouvrant, et c'est lui qui fait avancer la quete.
+							-- Notre version ne connaissait que la variante
+							-- "DontComplete", qui par construction ne complete
+							-- rien : on lisait l'etat sans jamais franchir l'etape.
+							pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
+							task.wait(0.3)
+							pcall(function() dataFunction:InvokeServer("StartQuest", questName) end)
+							task.wait(0.5)
+
+							-- Lecture seule pour savoir ou on en est, la variante
+							-- DontComplete etant justement celle qui n'agit pas.
+							local progress = M.questProgress(dataFunction, questName)
+							notify(npc.name .. " -> " .. tostring(progress), "info")
+							if progress and progress:find("Finished") then
+								finished = true
+								break
+							end
+						end
+					end
+					if finished then break end
+				end
+
+				local back = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if back then back.CFrame = origin end
+				if finished then
+					notify(questName .. " : terminee.", "success")
+				else
+					notify(questName .. " : objectif non rempli (quete non dialoguee ?).", "error")
+				end
+			end)
+		end
+
+		local AutoProgSection = addSection(AutoPage, "AutoProg")
+		FEATURE_CONTROLS.AutoProgPauseOnChakraSense = addToggleRow(AutoProgSection, "Pause si Chakra Sense detecte", Settings.AutoProgPauseOnChakraSense, function(value)
+			Settings.AutoProgPauseOnChakraSense = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoProgPauseOnChakraSense.Row, "Suspend l'automatisation tant que quelqu'un a Chakra Sense actif, et reprend ensuite. Meme comportement que la pause d'Auto Boss.")
+		FEATURE_CONTROLS.AutoProgChakraPoints = addToggleRow(AutoProgSection, "Debloquer tous les Chakra Points", false, function(value)
+			state.running = value
+			if value then
+				M.unlockAll()
+			else
+				state.token = state.token + 1
+			end
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoProgChakraPoints.Row, "Passe sur chaque Chakra Point verrouille et le debloque, en respectant les 5 s de cooldown du jeu. Te ramene a ton point de depart a la fin.")
+
+		do
+			-- Liste BLANCHE des missions verifiees, pas la liste complete du jeu.
+			--
+			-- Meme demarche que la table des boss : on ne propose que ce qu'on a
+			-- vu aboutir. Les 45 quetes du jeu n'ont pas toutes une mecanique de
+			-- dialogue/livraison - beaucoup exigent de tuer ou de ramasser, et
+			-- l'objectif vit cote serveur sans etre decrit dans les donnees du
+			-- client. Les proposer toutes reviendrait a offrir des echecs.
+			--
+			-- InnKeeper's Reunion : relevee au mouchard de bout en bout, jusqu'a
+			-- {"Progress":"FinishedGood","Completed":true}.
+			--
+			-- Pour en ajouter une : la faire une fois avec le mouchard arme, et
+			-- verifier que StartQuest chez les PNJ lies suffit a la boucler.
+			local VERIFIED = {
+				"InnKeeper's Reunion",
+			}
+
+			FEATURE_CONTROLS.AutoProgQuest = addDropdownRow(AutoProgSection, "Mission", VERIFIED, VERIFIED[1], function(value)
+				Settings.AutoProgQuest = value
+			end, true)
+			attachTooltip(FEATURE_CONTROLS.AutoProgQuest.Instance, "Seules les missions verifiees en jeu sont listees. Dis-moi lesquelles ajouter apres les avoir testees.")
+			addButtonRow(AutoProgSection, "Faire la mission", function()
+				local control = FEATURE_CONTROLS.AutoProgQuest
+				local questName = control and control.Get()
+				if questName then M.runQuest(questName) end
+			end)
+		end
+	end
+
+	do
 		-- Attach to Back : l'attach d'Auto Boss retourne, sur un JOUEUR choisi
 		-- dans la liste. Sur un boss on se pose au-dessus, face vers le bas ; ici
 		-- on se pose SOUS la cible, face vers le haut. On s'y recolle a CHAQUE
@@ -8324,10 +9153,25 @@ task.spawn(function()
 		local cooldownsFolder = ReplicatedStorage:FindFirstChild("Cooldowns")
 		if cooldownsFolder then
 			for _, playerFolder in ipairs(cooldownsFolder:GetChildren()) do
-				if playerFolder:FindFirstChild("Chakra Sense") then
-					ChakraSenseThreat.lastSeen = os.clock()
-					if FeatureState.ChakraSenseNotifier then
-						notify(string.format("%s a Chakra Sense actif", playerFolder.Name))
+				local entry = playerFolder:FindFirstChild("Chakra Sense")
+				-- La PRESENCE de l'entree ne prouve rien : ces NumberValue sont
+				-- horodates et PERSISTENT (verifie en jeu, aucun retrait observe).
+				-- Se fier a leur existence declarait la menace active en
+				-- permanence des qu'un joueur avait lance le sort une fois depuis
+				-- sa connexion - ce qui figeait indefiniment tout ce qui attend
+				-- une accalmie : la pause d'Auto Boss et celle d'AutoProg, sans
+				-- le moindre message.
+				--
+				-- La valeur est l'HEURE DU DERNIER LANCEMENT : releve en jeu une
+				-- entree datant de 48 s alors que le cooldown declare du sort est
+				-- de 0.1 s. On ne retient donc que les lancements recents.
+				if entry then
+					local ok, castAt = pcall(function() return entry.Value end)
+					if ok and type(castAt) == "number" and os.time() - castAt < SENSE_RECENT_SECONDS then
+						ChakraSenseThreat.lastSeen = os.clock()
+						if FeatureState.ChakraSenseNotifier then
+							notify(string.format("%s a Chakra Sense actif", playerFolder.Name))
+						end
 					end
 				end
 			end
