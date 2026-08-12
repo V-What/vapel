@@ -59,6 +59,133 @@ local Theme = {
 }
 
 --------------------------------------------------------------------------------
+-- Garde anti-double-chargement.
+--
+-- Relancer le script par-dessus une instance vivante empilait deux jeux de
+-- connexions, deux boucles de combat et deux menus, sans le moindre signe -
+-- d'ou les "doublons" constates en test. On demande donc quoi faire.
+--
+-- Place ICI, avant toute connexion ou tout hook : une fois qu'on a commence a
+-- s'accrocher au jeu, annuler ne servirait plus a rien.
+--
+-- L'instance precedente se signale par getgenv().__VonClient, une table qui
+-- porte sa fonction unload (renseignee plus bas, une fois unload defini). Le
+-- choix transite par ce meme espace global plutot que par une variable locale :
+-- ca evite d'ouvrir un registre a la racine du fichier (voir la note des 200
+-- registres en tete de fichier).
+--
+-- L'invite se construit en Instance.new brut plutot qu'avec les helpers du
+-- menu : ceux-ci sont definis bien plus bas, et l'interet de cette garde est
+-- justement d'arriver avant eux.
+--------------------------------------------------------------------------------
+
+do
+	-- getgenv() lu ICI et pas dans un local a la racine : le fichier est pile a
+	-- la limite des 200 registres Luau, et un local de plus la faisait deborder
+	-- (COMPILE ERROR sur AutoBossSection). Declare dans ce do...end, il rend son
+	-- registre a la fermeture du bloc.
+	local VonEnv = (getgenv and getgenv()) or _G
+	-- Remis a zero AVANT tout test : un choix residuel d'une execution
+	-- precedente bloquerait un lancement legitime.
+	VonEnv.__VonChoice = nil
+	local previous = VonEnv.__VonClient
+	if previous and previous.unload then
+		local Prompt = Instance.new("ScreenGui")
+		Prompt.Name = "Von Client Prompt"
+		Prompt.ResetOnSpawn = false
+		Prompt.DisplayOrder = 1000
+		Prompt.Parent = PlayerGui
+
+		local Card = Instance.new("Frame")
+		Card.AnchorPoint = Vector2.new(1, 1)
+		Card.Position = UDim2.new(1, -16, 1, -16)
+		Card.Size = UDim2.new(0, 300, 0, 146)
+		Card.BackgroundColor3 = Theme.Panel
+		Card.BorderSizePixel = 0
+		Card.Parent = Prompt
+		Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
+		local stroke = Instance.new("UIStroke", Card)
+		stroke.Color = Theme.StrokeStrong
+		stroke.Transparency = 0
+
+		local title = Instance.new("TextLabel")
+		title.BackgroundTransparency = 1
+		title.Position = UDim2.new(0, 14, 0, 12)
+		title.Size = UDim2.new(1, -28, 0, 20)
+		title.Font = Enum.Font.GothamBold
+		title.TextSize = 15
+		title.TextXAlignment = Enum.TextXAlignment.Left
+		title.TextColor3 = Theme.Text
+		title.Text = "Von Client deja lance"
+		title.Parent = Card
+
+		local body = Instance.new("TextLabel")
+		body.BackgroundTransparency = 1
+		body.Position = UDim2.new(0, 14, 0, 34)
+		body.Size = UDim2.new(1, -28, 0, 32)
+		body.Font = Enum.Font.GothamMedium
+		body.TextSize = 13
+		body.TextXAlignment = Enum.TextXAlignment.Left
+		body.TextYAlignment = Enum.TextYAlignment.Top
+		body.TextWrapped = true
+		body.TextColor3 = Theme.SubText
+		body.Text = "Une instance tourne deja. Deux instances se battent pour ta position et tes touches."
+		body.Parent = Card
+
+		-- Trois boutons empiles : les libelles sont longs, une rangee de trois
+		-- les tronquerait sur 300 px de large.
+		for index, option in ipairs({
+			{ key = "unload", text = "Decharger l'ancienne et relancer", accent = true },
+			{ key = "both", text = "Lancer quand meme (2 instances)", accent = false },
+			{ key = "cancel", text = "Annuler", accent = false },
+		}) do
+			local button = Instance.new("TextButton")
+			button.Position = UDim2.new(0, 14, 0, 60 + (index - 1) * 26)
+			button.Size = UDim2.new(1, -28, 0, 22)
+			button.BackgroundColor3 = option.accent and Theme.Accent or Theme.Element
+			button.BorderSizePixel = 0
+			button.AutoButtonColor = true
+			button.Font = Enum.Font.GothamBold
+			button.TextSize = 12
+			button.TextColor3 = option.accent and Theme.OnAccent or Theme.Text
+			button.Text = option.text
+			button.Parent = Card
+			Instance.new("UICorner", button).CornerRadius = UDim.new(0, 4)
+			button.MouseButton1Click:Connect(function()
+				VonEnv.__VonChoice = option.key
+			end)
+		end
+
+		-- 30 s sans reponse : on annule. Mieux vaut ne rien faire que de laisser
+		-- une invite orpheline si le joueur ne l'a pas vue.
+		local deadline = os.clock() + 30
+		repeat task.wait(0.1) until VonEnv.__VonChoice or os.clock() > deadline
+		Prompt:Destroy()
+
+		if not VonEnv.__VonChoice then VonEnv.__VonChoice = "cancel" end
+		if VonEnv.__VonChoice == "unload" then
+			pcall(previous.unload)
+		end
+	end
+end
+
+if ((getgenv and getgenv()) or _G).__VonChoice == "cancel" then return end
+
+-- Le jeu est-il reellement charge ? Sur l'ecran de menu (liste des serveurs),
+-- ReplicatedStorage ne contient que Servers et Events : GameManager, Settings
+-- et UI n'existent pas encore. Sans ce garde-fou, le script se chargeait a
+-- moitie puis mourait sur require(ReplicatedStorage.GameManager) - menu affiche
+-- mais Auto Boss, Attach to Back et le bouton de decharge absents, et surtout
+-- marque d'instance jamais posee, donc garde anti-double-chargement inoperante.
+if not ReplicatedStorage:FindFirstChild("GameManager") then
+	ReplicatedStorage:WaitForChild("GameManager", 20)
+end
+if not ReplicatedStorage:FindFirstChild("GameManager") then
+	warn("[Von Client] Jeu pas encore charge (GameManager absent) - relance le script une fois en partie.")
+	return
+end
+
+--------------------------------------------------------------------------------
 -- Persistance : dossier von_client/ pour tous les writefile du script.
 --   von_client/prefs.json     -> preferences d'app (taille fenetre, touche menu),
 --                                 toujours auto-sauvegardees (pas des "cheats").
@@ -308,6 +435,7 @@ local DEFAULT_FEATURES = {
 	SpectatedNotifier = true,
 	NoFogEnabled = false,
 	NoRainEnabled = false,
+	NoSnowEnabled = false,
 	FullBrightEnabled = false,
 	BrightnessLevel = 1,
 	TimeChangerEnabled = false,
@@ -335,6 +463,7 @@ local DEFAULT_FEATURES = {
 	HudSenseActive = true,
 	HudSenseOwners = true,
 	HudNearest = true,
+	AntiFallDamage = false,
 	-- Attach to Back : studs SOUS la cible. Seule la distance est persistee, la
 	-- cible ne l'est pas - un nom de joueur n'a de sens que sur le serveur courant.
 	AttachBackDistance = 8,
@@ -452,6 +581,7 @@ local FeatureState = {
 	SpectatedNotifier = Settings.SpectatedNotifier,
 	NoFogEnabled = Settings.NoFogEnabled,
 	NoRainEnabled = Settings.NoRainEnabled,
+	NoSnowEnabled = Settings.NoSnowEnabled,
 	FullBrightEnabled = Settings.FullBrightEnabled,
 	BrightnessLevel = Settings.BrightnessLevel,
 	TimeChangerEnabled = Settings.TimeChangerEnabled,
@@ -986,12 +1116,44 @@ local function setNoFog(state)
 		noFogConn:Disconnect()
 		noFogConn = nil
 	end
+	-- LocalTransparencyModifier et pas Transparency : c'est un reglage de RENDU
+	-- purement local, qui ne part jamais au serveur et ne se bat pas contre les
+	-- tweens du jeu sur Transparency. Rendu final = T + (1 - T) * LTM, donc
+	-- LTM = 1 rend la piece invisible quelle que soit sa transparence reelle.
+	local function sphere()
+		local debris = workspace:FindFirstChild("Debris")
+		return debris and debris:FindFirstChild("InvertedSphere")
+	end
+	-- Certaines zones ajoutent un FLOU en plus du brouillard : "Rain Village" a
+	-- Blur = 2 dans GameManager.Locations, applique a Lighting.WorldBlur. Ce
+	-- n'est pas du brouillard, mais a l'ecran ca en a tout l'air - No Fog
+	-- semblait donc "ne pas marcher" la-bas. Le DepthOfField brouille lui aussi
+	-- le lointain. On neutralise les deux, et on les restaure a l'extinction.
+	local function effect(name)
+		local found = Lighting:FindFirstChild(name)
+		return found
+	end
 	if state then
 		noFogConn = track(RunService.RenderStepped:Connect(function()
 			Lighting.FogEnd = 9999999999
+			local blur = effect("WorldBlur")
+			if blur and blur.Size ~= 0 then blur.Size = 0 end
+			local dof = effect("DepthOfField")
+			if dof and dof.Enabled then dof.Enabled = false end
+			-- Reaffirme a chaque frame : le jeu repose et retween cette sphere a
+			-- chaque changement de zone (updateLocation, call.lua ~L1070), avec
+			-- une taille de FogEnd * 2 et la couleur du brouillard local. Sans
+			-- elle, FogEnd seul ne suffit pas - c'est la "sphere" qui bouchait
+			-- encore la vue.
+			local s = sphere()
+			if s then s.LocalTransparencyModifier = 1 end
 		end))
 	else
 		Lighting.FogEnd = originalFogEnd
+		local s = sphere()
+		if s then s.LocalTransparencyModifier = 0 end
+		local dof = effect("DepthOfField")
+		if dof then dof.Enabled = true end
 	end
 end
 
@@ -1029,17 +1191,61 @@ end
 -- ne coupe jamais vraiment la boucle au toggle off (le flag "state" n'etait
 -- teste qu'a l'activation) : ici noRainActive stoppe proprement la boucle.
 local noRainActive = false
+local noRainMuted = {} -- emetteurs de decor eteints par nous, a rallumer a l'extinction
+-- Deux pluies coexistent dans ce jeu, et elles n'ont rien en commun :
+--
+--   1. La METEO, pilotee par ReplicatedStorage.Raining. On la vide en continu.
+--   2. La pluie de DECOR de certains villages : un modele pose une fois pour
+--      toutes dans la map. Au village Rain c'est workspace.RainParts, avec des
+--      emetteurs a 120 particules/s sur MainRainPart, RainPart et
+--      SecondaryRainPart. Elle ignore totalement la valeur Raining - c'est
+--      pour ca que No Rain "ne marchait pas" la-bas.
+--
+-- Couper un ParticleEmitter depuis le client ne se replique pas : les autres
+-- joueurs continuent de voir la pluie normalement.
+--
+-- On memorise les emetteurs qu'on eteint pour ne rallumer que ceux-la a
+-- l'extinction, plutot que d'allumer aveuglement tout ce qui traine.
 local function setNoRain(state)
 	FeatureState.NoRainEnabled = state
 	noRainActive = state
-	if not state then return end
+
+	local scenery = workspace:FindFirstChild("RainParts")
+	if not state then
+		if scenery then
+			for _, d in ipairs(scenery:GetDescendants()) do
+				if d:IsA("ParticleEmitter") and noRainMuted[d] then
+					d.Enabled = true
+				end
+			end
+		end
+		table.clear(noRainMuted)
+		return
+	end
 
 	local rainingValue = ReplicatedStorage:FindFirstChild("Raining")
-	if not rainingValue then return end
 
 	task.spawn(function()
+		local nextSweep = 0
 		while noRainActive and not unloaded do
-			rainingValue.Value = ""
+			if rainingValue then
+				rainingValue.Value = ""
+			end
+			-- Balayage du decor moins souvent que la meteo : parcourir les
+			-- descendants a chaque frame serait cher pour rien, ces emetteurs ne
+			-- se rallument pas tout seuls.
+			if os.clock() >= nextSweep then
+				nextSweep = os.clock() + 1
+				local model = workspace:FindFirstChild("RainParts")
+				if model then
+					for _, d in ipairs(model:GetDescendants()) do
+						if d:IsA("ParticleEmitter") and d.Enabled then
+							noRainMuted[d] = true
+							d.Enabled = false
+						end
+					end
+				end
+			end
 			task.wait()
 		end
 	end)
@@ -1049,6 +1255,43 @@ end
 -- Noclip : desactive les collisions du personnage en continu (Stepped), donc
 -- se reapplique tout seul aux nouvelles parties (outils equipes, accessoires...).
 --------------------------------------------------------------------------------
+
+-- No Snow : la neige est pilotee par un emetteur cote client,
+-- LocalPlayer.PlayerScripts.Snow.Actor.Snowy, dont l'attribut "Rate" vaut 50 ou
+-- 150 selon l'intensite (call.lua ~L15163). On le force a 0.
+--
+-- Le dossier Snow n'existe PAS en permanence : le jeu le cree quand la neige
+-- demarre. La boucle doit donc le rechercher a chaque tour plutot que de le
+-- capturer une fois - sinon activer le toggle par temps clair ne ferait rien
+-- et ne rattraperait jamais la tempete suivante.
+--
+-- Purement local : PlayerScripts n'existe que sur notre machine, rien ne part
+-- au serveur. La meteo reste ce qu'elle est pour tout le monde, on refuse
+-- simplement de l'afficher.
+local noSnowActive = false
+local function setNoSnow(state)
+	FeatureState.NoSnowEnabled = state
+	noSnowActive = state
+	if not state then return end
+
+	task.spawn(function()
+		while noSnowActive and not unloaded do
+			local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
+			local snow = scripts and scripts:FindFirstChild("Snow")
+			local actor = snow and snow:FindFirstChild("Actor")
+			local snowy = actor and actor:FindFirstChild("Snowy")
+			if snowy then
+				snowy:SetAttribute("Rate", 0)
+			end
+			-- Calque plein ecran de tempete, clone depuis ReplicatedStorage.UI.
+			local overlay = PlayerGui:FindFirstChild("Snowstorm")
+			if overlay and overlay:IsA("ScreenGui") then
+				overlay.Enabled = false
+			end
+			task.wait(0.2)
+		end
+	end)
+end
 
 local noclipConn = nil
 local function setNoclip(state)
@@ -1974,8 +2217,7 @@ do
 	end
 end
 
-local WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT = 420, 340
-local WINDOW_MAX_WIDTH, WINDOW_MAX_HEIGHT = 900, 700
+local WINDOW = { MIN_W = 420, MIN_H = 340, MAX_W = 900, MAX_H = 700 }
 
 -- Chassis "Compact" : barre de titre fine, onglets en bande horizontale sous
 -- la barre de titre (plus de colonne laterale : sa largeur revient au
@@ -1990,8 +2232,8 @@ local TOPBAR_HEIGHT = MenuChrome.TopBar
 -- redimensionnement met a jour) ; separee de Main.Size car cette derniere
 -- vaut temporairement (0,0,0,0) pendant l'animation d'ouverture/fermeture.
 local targetSize = UDim2.new(
-	0, math.clamp(Prefs.WindowWidth, WINDOW_MIN_WIDTH, WINDOW_MAX_WIDTH),
-	0, math.clamp(Prefs.WindowHeight, WINDOW_MIN_HEIGHT, WINDOW_MAX_HEIGHT)
+	0, math.clamp(Prefs.WindowWidth, WINDOW.MIN_W, WINDOW.MAX_W),
+	0, math.clamp(Prefs.WindowHeight, WINDOW.MIN_H, WINDOW.MAX_H)
 )
 
 -- Il y avait ici un halo (Frame teinte accent) + une ombre (Frame noire),
@@ -2360,8 +2602,8 @@ do
 	UserInputService.InputChanged:Connect(function(input)
 		if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - resizeStart
-			local newWidth = math.clamp(startSize.X.Offset + delta.X, WINDOW_MIN_WIDTH, WINDOW_MAX_WIDTH)
-			local newHeight = math.clamp(startSize.Y.Offset + delta.Y, WINDOW_MIN_HEIGHT, WINDOW_MAX_HEIGHT)
+			local newWidth = math.clamp(startSize.X.Offset + delta.X, WINDOW.MIN_W, WINDOW.MAX_W)
+			local newHeight = math.clamp(startSize.Y.Offset + delta.Y, WINDOW.MIN_H, WINDOW.MAX_H)
 			targetSize = UDim2.new(0, newWidth, 0, newHeight)
 			Main.Size = targetSize
 			Prefs.WindowWidth = newWidth
@@ -2503,7 +2745,7 @@ local function createCategory(name, accentColor)
 	-- ~8 px/caractere) : les six onglets doivent tenir cote a cote meme a la
 	-- largeur MINIMALE de fenetre (420), sinon les derniers sont coupes.
 	-- Total a 8/caractere + 18 de marge : ~388 px, plus les 8 px de retrait a
-	-- gauche - ca passe tout juste, ne pas augmenter sans relever WINDOW_MIN_WIDTH.
+	-- gauche - ca passe tout juste, ne pas augmenter sans relever WINDOW.MIN_W.
 	local Button = create("TextButton", {
 		Size = UDim2.new(0, 8 * #name + 18, 1, 0),
 		BackgroundTransparency = 1,
@@ -2897,14 +3139,21 @@ end
 -- selecteur - c'est ce qu'on voyait avec "Gemmes" ouvert a cote d'une colonne
 -- gauche courte. En flottant, ouvrir un selecteur ne bouge plus rien.
 --
--- DROP_H vaut ROW_H : un selecteur occupe exactement la meme hauteur qu'un
+-- DROP.H vaut ROW_H : un selecteur occupe exactement la meme hauteur qu'un
 -- toggle ou un slider, sinon il casse le rythme vertical de la card.
--- DROP_MAX = 9 : les deux listes a cocher (Boss 8, Gemmes 9) tiennent alors en
+-- DROP.MAX = 9 : les deux listes a cocher (Boss 8, Gemmes 9) tiennent alors en
 -- entier sans avoir a defiler, ce qui est justement le cas ou on veut tout voir.
-local DROP_H, OPT_H, DROP_MAX = ROW_H, 29, 9 -- DROP_MAX : options visibles avant defilement
-local DROP_BOX = 160 -- largeur de la boite de valeur, a droite
-local DROP_SEARCH_FROM = 8 -- a partir de combien d'options on ajoute une recherche
-local DROP_SEARCH_H = 28
+-- Regroupees dans UNE table plutot qu'en six locals : le fichier est a la
+-- limite des 200 registres Luau (voir la note en tete de fichier), et six
+-- constantes a plat en consommaient six.
+local DROP = {
+	H = ROW_H,          -- hauteur de l'en-tete, alignee sur une ligne normale
+	OPT = 29,           -- hauteur d'une option
+	MAX = 9,            -- options visibles avant defilement
+	BOX = 160,          -- largeur de la boite de valeur, a droite
+	SEARCH_FROM = 8,    -- a partir de combien d'options on ajoute une recherche
+	SEARCH_H = 28,
+}
 
 -- En-tete commun, construit comme les autres lignes : libelle nu a gauche
 -- (meme couleur, meme taille qu'un toggle), et une boite compacte a droite
@@ -2913,19 +3162,19 @@ local DROP_SEARCH_H = 28
 -- de lignes nues. Renvoie Holder, bouton, label de valeur et chevron.
 local function buildDropHead(content, text, valueText)
 	local Holder = create("Frame", {
-		Size = UDim2.new(1, 0, 0, DROP_H),
+		Size = UDim2.new(1, 0, 0, DROP.H),
 		BackgroundTransparency = 1,
 	}, content)
 
 	local MainButton = create("TextButton", {
-		Size = UDim2.new(1, 0, 0, DROP_H),
+		Size = UDim2.new(1, 0, 0, DROP.H),
 		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
 	}, Holder)
 
 	Skin.paint(create("TextLabel", {
-		Size = UDim2.new(1, -(DROP_BOX + 10), 1, 0),
+		Size = UDim2.new(1, -(DROP.BOX + 10), 1, 0),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
@@ -2937,7 +3186,7 @@ local function buildDropHead(content, text, valueText)
 	local Box = Skin.paint(create("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, DROP_BOX, 0, 26),
+		Size = UDim2.new(0, DROP.BOX, 0, 26),
 	}, MainButton), { BackgroundColor3 = "Element" })
 	corner(Box, 3)
 	Skin.paint(create("UIStroke", { Transparency = 0 }, Box), { Color = "StrokeStrong" })
@@ -2978,7 +3227,7 @@ local function buildDropOption(list, label)
 	-- fond du panneau (12) recouvrait ses propres options (1) : la liste
 	-- s'ouvrait et restait cliquable, mais paraissait vide.
 	local OptButton = Skin.paint(create("TextButton", {
-		Size = UDim2.new(1, 0, 0, OPT_H),
+		Size = UDim2.new(1, 0, 0, DROP.OPT),
 		BackgroundTransparency = 1,
 		Text = label,
 		Font = Enum.Font.GothamMedium,
@@ -3012,12 +3261,12 @@ end
 -- d'ou cette plage.
 -- Renvoie { Panel, Scroll, Search, Open, Close, IsOpen }.
 --
--- Une barre de recherche apparait a partir de DROP_SEARCH_FROM options : c'est
+-- Une barre de recherche apparait a partir de DROP.SEARCH_FROM options : c'est
 -- indispensable sur les listes longues (les ~30 objets achetables), ou faire
 -- defiler a l'aveugle est penible.
 local function buildDropList(holder, optionCount)
-	local withSearch = optionCount >= DROP_SEARCH_FROM
-	local searchOffset = withSearch and DROP_SEARCH_H or 0
+	local withSearch = optionCount >= DROP.SEARCH_FROM
+	local searchOffset = withSearch and DROP.SEARCH_H or 0
 
 	local Panel = Skin.paint(create("Frame", {
 		Visible = false,
@@ -3030,7 +3279,7 @@ local function buildDropList(holder, optionCount)
 	if withSearch then
 		Search = Skin.paint(create("TextBox", {
 			Position = UDim2.new(0, 1, 0, 1),
-			Size = UDim2.new(1, -2, 0, DROP_SEARCH_H - 2),
+			Size = UDim2.new(1, -2, 0, DROP.SEARCH_H - 2),
 			BackgroundTransparency = 1,
 			Text = "",
 			PlaceholderText = "Rechercher...",
@@ -3042,7 +3291,7 @@ local function buildDropList(holder, optionCount)
 		}, Panel), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
 		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, Search)
 		Skin.paint(create("Frame", {
-			Position = UDim2.new(0, 0, 0, DROP_SEARCH_H - 1),
+			Position = UDim2.new(0, 0, 0, DROP.SEARCH_H - 1),
 			Size = UDim2.new(1, 0, 0, 1),
 			BorderSizePixel = 0,
 			ZIndex = 13,
@@ -3071,14 +3320,14 @@ local function buildDropList(holder, optionCount)
 	-- visibleCount : nombre d'options non filtrees, pour que le panneau ne garde
 	-- pas une hauteur fixe quand la recherche en masque la moitie.
 	function api.Open(visibleCount)
-		local rows = math.clamp(visibleCount or optionCount, 1, DROP_MAX)
-		local height = searchOffset + rows * OPT_H
+		local rows = math.clamp(visibleCount or optionCount, 1, DROP.MAX)
+		local height = searchOffset + rows * DROP.OPT
 		local origin = Main.AbsolutePosition
 		local anchor = holder.AbsolutePosition
 
 		-- Sous l'en-tete par defaut ; au-dessus si la liste depasserait le bas de
 		-- l'ecran (typiquement un selecteur en bas d'une page bien remplie).
-		local top = anchor.Y + DROP_H
+		local top = anchor.Y + DROP.H
 		if top + height > ScreenGui.AbsoluteSize.Y - 8 then
 			top = anchor.Y - height
 		end
@@ -3114,7 +3363,7 @@ local function addDropdownRow(content, text, options, default, onChange, dynamic
 	local Holder, MainButton, ValueLabel, Chevron = buildDropHead(content, text, tostring(selected))
 	MenuChrome.track(Holder, text)
 
-	local drop = buildDropList(Holder, dynamic and DROP_SEARCH_FROM or #options)
+	local drop = buildDropList(Holder, dynamic and DROP.SEARCH_FROM or #options)
 	local buttons = {}
 
 	local function close()
@@ -3833,6 +4082,11 @@ do
 			setNoRain(state)
 			Settings.NoRainEnabled = state
 		end)
+		FEATURE_CONTROLS.NoSnowEnabled = addToggleRow(EnvSection, "No Snow", FeatureState.NoSnowEnabled, function(state)
+			setNoSnow(state)
+			Settings.NoSnowEnabled = state
+		end)
+		attachTooltip(FEATURE_CONTROLS.NoSnowEnabled.Row, "Coupe l'emetteur de neige (PlayerScripts.Snow, Rate a 0) et le calque de tempete. Peut etre active par temps clair : la boucle rattrape la neige des qu'elle demarre.")
 		FEATURE_CONTROLS.FullBrightEnabled = addToggleRow(EnvSection, "Full Bright", FeatureState.FullBrightEnabled, function(state)
 			setFullBright(state)
 			Settings.FullBrightEnabled = state
@@ -6355,7 +6609,9 @@ do
 		-- Rotation en fait partie (CanBeBlocked = true) - bloquer ne suffit pas
 		-- quand ca tape 12 fois de suite.
 		M.DODGE_SKILLS = {
-			["Vacuum Rotation"] = true,
+			["Vacuum Rotation"] = true, -- CanBeBlocked=true mais tape 12 fois de suite
+			["Lightning Ripple"] = true, -- EndActionAnim 1.4 s
+			["Crow Illusion"] = true,   -- EndActionAnim 2.5 s
 		}
 
 		-- Tout sort marque CanBeBlocked = false est esquive automatiquement : la
@@ -7569,54 +7825,55 @@ do
 	end
 
 	do
-		-- Reset Character : appelle le VRAI reset du jeu, pas un bricolage.
+		-- Reset Character.
 		--
 		-- Le jeu remplace le bouton reset natif de Roblox par le sien
-		-- (data.lua ~L16231) :
-		--     local BindableEvent = Instance.new("BindableEvent")
-		--     BindableEvent.Event:connect(function()
-		--         if DataFunction:InvokeServer("ResetPlayer") then u32.Occupied = true end
-		--     end)
-		--     StarterGui:SetCore("ResetButtonCallback", BindableEvent)
-		-- Donc appuyer sur Echap > Reset revient exactement a invoquer
-		-- "ResetPlayer". C'est ce qu'on fait ici, ce qui evite les approches
-		-- classiques mais fausses dans ce jeu : Humanoid.Health = 0 ou
-		-- BreakJoints() cote client ne se repliquent pas (le serveur garde sa
-		-- propre vue de nos PV), donc elles ne feraient que casser l'affichage
-		-- local sans jamais nous faire reapparaitre.
+		-- (data.lua ~L16231, InvokeServer("ResetPlayer")). On est passe par la
+		-- d'abord, mais le serveur le refuse dans beaucoup d'etats - en combat,
+		-- Occupied, grippe - et repond alors false sans rien faire.
+		--
+		-- A ecarter aussi : Humanoid.Health = 0 et BreakJoints() cote client ne
+		-- se repliquent pas, le serveur garde sa vue de nos PV. Elles cassent
+		-- l'affichage local sans jamais faire reapparaitre.
+		--
+		-- Methode d'Infinite Yield (commande "respawn"), qui marche la ou
+		-- ResetPlayer se fait refuser : on donne au joueur un personnage bidon
+		-- une frame, puis on lui rend l'ancien. Le moteur considere l'ancien
+		-- personnage comme abandonne et declenche le respawn normal.
+		--
+		-- Aucun remote n'est tire : c'est une manipulation de Player.Character,
+		-- donc rien a refuser pour le serveur, contrairement a ResetPlayer qui
+		-- repondait false en combat ou pendant une action.
 		local function resetCharacter()
-			local events = ReplicatedStorage:FindFirstChild("Events")
-			local dataFunction = events and events:FindFirstChild("DataFunction")
-			if not dataFunction then
-				notify("ReplicatedStorage.Events.DataFunction introuvable.", "error")
+			local character = LocalPlayer.Character
+			if not character then
+				notify("Pas de personnage a reset.", "error")
 				return
 			end
-			-- La garde bloque beaucoup d'actions cote serveur : on la rend avant
-			-- de demander, pour ne pas se faire refuser pour une raison qu'on a
-			-- nous-memes creee.
-			pcall(function() dataFunction:InvokeServer("EndBlock") end)
-
-			-- Trois tentatives : le refus est souvent temporaire (Occupied le
-			-- temps d'une animation, cooldown de melee...), pas definitif.
-			for _ = 1, 3 do
-				local ok, result = pcall(function() return dataFunction:InvokeServer("ResetPlayer") end)
-				if ok and result then
-					notify("Reset envoye.", "success")
-					return
-				end
-				task.wait(0.3)
+			local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+			if humanoid and humanoid.Health <= 0 then
+				notify("Deja mort.", "error")
+				return
 			end
 
-			-- Le serveur refuse dans certains etats (en combat, Occupied,
-			-- grippe...). On le dit franchement plutot que de forcer une mort :
-			-- une mort dans le vide reste une mort, avec ce que ca implique en
-			-- jeu, alors qu'un reset refuse se retente une seconde plus tard.
-			notify("Le serveur a refuse le reset (reessaie dans un instant).", "error")
+			local ok, err = pcall(function()
+				local decoy = Instance.new("Model")
+				decoy.Parent = workspace
+				LocalPlayer.Character = decoy
+				task.wait()
+				LocalPlayer.Character = character
+				decoy:Destroy()
+			end)
+			if ok then
+				notify("Reset envoye.", "success")
+			else
+				notify("Reset impossible : " .. tostring(err), "error")
+			end
 		end
 
 		local ResetSection = addSection(AutresPage, "Reset Character")
 		attachTooltip(addButtonRow(ResetSection, "Reset Character", resetCharacter),
-			"Appelle le vrai reset du jeu (ResetPlayer), celui-la meme que le bouton Echap declenche.")
+			"Methode d'Infinite Yield : bascule une frame sur un personnage bidon pour forcer le respawn. Marche meme quand le jeu refuse son propre reset.")
 		KeybindTool.bind(ResetSection, "ResetCharacter", "Reset Character", nil, resetCharacter)
 	end
 
@@ -7908,6 +8165,12 @@ end
 local function unload()
 	if unloaded then return end
 	unloaded = true
+	-- Efface la marque : sans ca, un rechargement apres un unload manuel
+	-- retrouverait une instance fantome et proposerait l'invite pour rien.
+	local env = (getgenv and getgenv()) or _G
+	if env.__VonClient and env.__VonClient.unload == unload then
+		env.__VonClient = nil
+	end
 
 	if request then
 		pcall(sendOverlayPacket, { enabled = false, players = {} })
@@ -7923,6 +8186,11 @@ local function unload()
 
 	ScreenGui:Destroy()
 end
+
+-- Se signale aux executions suivantes : c'est cette marque que lit la garde
+-- anti-double-chargement en tete de fichier pour savoir qu'une instance vit
+-- deja, et pour pouvoir la decharger si on choisit de relancer.
+((getgenv and getgenv()) or _G).__VonClient = { unload = unload }
 
 -- Section large (3e argument) : le bouton de decharge est la seule action
 -- irreversible du menu, il ne partage pas sa rangee avec autre chose.
@@ -8058,6 +8326,23 @@ selectPage("Visuels")
 MenuChrome.refreshRight() -- remplit la moitie droite de la barre d'etat (config + touche menu)
 playInjectionSplash()
 KeybindTool.refreshHud() -- construit le HUD une fois tous les KeybindTool.bind faits plus haut
+
+-- Applique une fois les reglages charges, MAINTENANT que tous les controles
+-- existent.
+--
+-- Sans ca, une config chargee au demarrage n'etait qu'a moitie appliquee :
+-- add*Row pose bien la valeur initiale a l'affichage, mais ne declenche PAS son
+-- onChange. Toute feature dont l'effet passe uniquement par ce callback restait
+-- donc inerte alors que son interrupteur s'affichait allume - il fallait
+-- l'eteindre puis le rallumer pour que ca parte. C'etait le cas du Spectate
+-- Leaderboard (dont le module ne recoit state.enabled que par la), mais aussi
+-- d'Auto Boss, de la Garde Auto, de l'Envoi Auto et de l'Auto Infuse, qui
+-- demarrent tous leur boucle dans leur onChange.
+--
+-- Passer par applyFeatureSettings plutot que de corriger chaque module : c'est
+-- exactement ce que fait le chargement manuel d'une config depuis le menu, donc
+-- un chemin deja eprouve, et ca couvre aussi les features a venir.
+applyFeatureSettings(Settings)
 
 -- Rafraichit le statut de connexion une fois par seconde (pas besoin de plus).
 task.spawn(function()
