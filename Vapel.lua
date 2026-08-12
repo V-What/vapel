@@ -231,6 +231,7 @@ local DEFAULT_PREFS = {
 	InventoryWebhookUrl = "https://discord.com/api/webhooks/1534652533186887800/X3KqFqpuIBdQa7DqWJI7U0Gg1PA2FiB76cj78HOKBEkxftwCiPW3fwNYipO3p77rhT-u",
 	ShowKeybindHud = false,
 	MenuTheme = "Graphite",
+	AutoRunAfterTeleport = false, -- relancer le script apres un changement de serveur
 }
 
 local Prefs = {}
@@ -8109,6 +8110,54 @@ do
 		savePrefs()
 		KeybindTool.hudFrame.Visible = state
 	end).Row, "Affiche a l'ecran les touches assignees a chaque feature active.")
+end
+
+do
+	-- Relance apres un changement de serveur (server hop).
+	--
+	-- queue_on_teleport met une source en file d'attente : l'executeur la lance
+	-- de l'autre cote du teleport. Elle est CONSOMMEE au passage, donc pour que
+	-- deux hops d'affilee marchent, il faut la reposer a chaque demarrage - ce
+	-- que fait l'appel en bas de ce bloc, puisque le script relance repasse ici.
+	--
+	-- Le code mis en file relit la preference AU MOMENT du teleport plutot que
+	-- de la figer a l'armement : couper le toggle apres coup annule donc bien la
+	-- relance, alors qu'aucun executeur ne permet de vider la file.
+	--
+	-- La source vient de GitHub, pas du disque : c'est le seul point fixe qui
+	-- survit a un changement de serveur. Corollaire a garder en tete - c'est le
+	-- DERNIER COMMIT POUSSE qui sera relance, pas un build local non pousse.
+	local QUEUED = [==[
+task.wait(2)
+local ok, prefs = pcall(function()
+	return game:GetService("HttpService"):JSONDecode(readfile("von_client/prefs.json"))
+end)
+if ok and prefs and prefs.AutoRunAfterTeleport then
+	pcall(function()
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/V-What/vapel/master/Vapel.lua"))()
+	end)
+end
+]==]
+
+	local function armTeleportQueue()
+		if not Prefs.AutoRunAfterTeleport then return end
+		if type(queue_on_teleport) ~= "function" then return end
+		pcall(queue_on_teleport, QUEUED)
+	end
+
+	local TeleportSection = addSection(SettingsPage, "Server Hop")
+	attachTooltip(addToggleRow(TeleportSection, "Relancer apres un changement de serveur", Prefs.AutoRunAfterTeleport, function(state)
+		Prefs.AutoRunAfterTeleport = state
+		savePrefs()
+		if state then armTeleportQueue() end
+	end).Row, "Relance automatiquement le script apres un server hop. C'est la version GitHub qui est chargee, donc pense a pousser tes modifications.")
+
+	if type(queue_on_teleport) ~= "function" then
+		addLabelRow(TeleportSection, "queue_on_teleport indisponible sur cet executeur.")
+	end
+
+	-- Rearme des le chargement : c'est ce qui fait tenir les hops enchaines.
+	armTeleportQueue()
 end
 
 do
