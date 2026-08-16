@@ -478,6 +478,12 @@ local DEFAULT_FEATURES = {
 	AutoEquipWeaponEnabled = false,
 	AutoBossEnabled = false,
 	AutoBossPauseOnChakraSense = true,
+	-- Chakra Sense + : pause sur le sort SELECTIONNE en main, sans attendre
+	-- qu'il soit lance (voir ChakraSenseThreat.itemHolder).
+	AutoBossPauseOnSenseItem = true,
+	-- Ignorer un boss avec un autre joueur a moins de X studs.
+	AutoBossSkipIfPlayerNearby = false,
+	AutoBossSkipRadius = 150,
 	AutoProgPauseOnChakraSense = true,
 	AutoProgQuest = nil,
 	PanicHealEnabled = true,
@@ -488,6 +494,7 @@ local DEFAULT_FEATURES = {
 	HudSenseOwners = true,
 	HudNearest = true,
 	AntiFallDamage = false,
+	NoKillBricks = false,
 	-- Attach to Back : studs SOUS la cible. Seule la distance est persistee, la
 	-- cible ne l'est pas - un nom de joueur n'a de sens que sur le serveur courant.
 	AttachBackDistance = 8,
@@ -613,6 +620,8 @@ local FeatureState = {
 	NoclipEnabled = Settings.NoclipEnabled,
 	FlyEnabled = Settings.FlyEnabled,
 	FlySpeed = Settings.FlySpeed,
+	AntiFallDamage = Settings.AntiFallDamage,
+	NoKillBricks = Settings.NoKillBricks,
 }
 
 local lastConnOk = nil -- nil = pas encore teste, true/false = dernier resultat request()
@@ -725,6 +734,60 @@ local function heldItemName(character)
 	-- Repli : un vrai Tool Roblox, si le jeu en pose un jour.
 	local tool = character:FindFirstChildWhichIsA("Tool")
 	return tool and tool.Name or nil
+end
+
+-- "Chakra Sense +" : le signal ChakraSenseThreat plus haut ne se leve qu'au
+-- LANCEMENT du sort - c'est-a-dire trop tard, on est deja dans le champ de
+-- detection au moment ou on l'apprend. Ceci le complete en amont : quelqu'un
+-- qui a Chakra Sense SELECTIONNE en main, meme sans jamais l'avoir lance, est
+-- une menace a venir.
+--
+-- Se lit sur la meme etiquette que l'ESP (FakeHead.skillGUI.skillName, voir
+-- heldItemName) : elle est repliquee pour tout le monde, donc portee serveur
+-- entiere et pas besoin du Sharingan.
+--
+-- Portee serveur entiere, justement, avec le revers a garder en tete :
+-- quelqu'un qui laisse Chakra Sense selectionne et part faire autre chose
+-- maintient la pause aussi longtemps qu'il reste connecte. C'est le prix de la
+-- prudence, d'ou le toggle separe de celui du lancement.
+--
+-- Resultat mis en cache une demi-seconde : la boucle Auto Boss tourne a 0.1 s,
+-- inutile de balayer tous les personnages dix fois par seconde pour une
+-- etiquette qui ne change pas a ce rythme.
+function ChakraSenseThreat.itemHolder()
+	local now = os.clock()
+	if now - (ChakraSenseThreat.scannedAt or -math.huge) < 0.5 then
+		return ChakraSenseThreat.holder
+	end
+	ChakraSenseThreat.scannedAt = now
+	ChakraSenseThreat.holder = nil
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local ok, held = pcall(heldItemName, player.Character)
+			if ok and held == "Chakra Sense" then
+				ChakraSenseThreat.holder = player.Name
+				break
+			end
+		end
+	end
+	return ChakraSenseThreat.holder
+end
+
+-- Raison de mise en pause d'Auto Boss (texte affiche tel quel dans le HUD), ou
+-- nil s'il n'y a rien a craindre. Regroupe ici les DEUX detections pour que les
+-- trois endroits qui suspendent le farm (boucle principale, nettoyage des mobs,
+-- ramassage du loot) suivent forcement la meme regle.
+function ChakraSenseThreat.bossPauseReason()
+	if Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive() then
+		return "Chakra Sense actif a proximite"
+	end
+	if Settings.AutoBossPauseOnSenseItem then
+		local holder = ChakraSenseThreat.itemHolder()
+		if holder then
+			return holder .. " a Chakra Sense en main"
+		end
+	end
+	return nil
 end
 
 local function refreshPlayerLabel(data)
@@ -1319,6 +1382,195 @@ local function setNoSnow(state)
 			task.wait(0.2)
 		end
 	end)
+end
+
+--------------------------------------------------------------------------------
+-- No Fall Damage.
+--
+-- Les degats de chute sont calcules par le CLIENT, qui se les inflige ensuite
+-- lui-meme : fallDamage() (data.lua L6100) mesure la hauteur perdue
+-- (Last_Y - Torso.Y), applique les modificateurs (Lightweight, Fractured Ribs,
+-- Wind, vetements...) puis tire DataEvent:FireServer("TakeDamage", montant).
+-- Le serveur n'evalue rien, il encaisse le chiffre qu'on lui donne.
+--
+-- On n'intercepte pas ce remote et on ne truque pas le montant : on emprunte la
+-- sortie que le jeu se menage lui-meme des la premiere ligne de la fonction.
+--
+--   if u9:FindFirstChild("ForceField") or (u10.BeingCarried.Value ~= "None"
+--      or (u9:GetAttribute("FallDamageImmunity") or ...)) then
+--       u32.Last_Y = u9.Torso.Position.Y;
+--       return;
+--   end;
+--
+-- Poser l'attribut FallDamageImmunity sur notre personnage fait abandonner le
+-- calcul AVANT le FireServer : rien n'est envoye, il n'y a pas de message a
+-- filtrer ni de valeur incoherente a expliquer. Et comme ce chemin remet aussi
+-- Last_Y au passage, la hauteur ne s'accumule pas pendant la chute - couper le
+-- toggle en plein vol ne declenche donc pas la facture d'un coup.
+--
+-- Un attribut ecrit par le CLIENT sur son propre personnage ne se replique
+-- jamais au serveur : cote serveur, l'attribut n'existe pas. Le client du jeu
+-- ne fait d'ailleurs que le LIRE (aucun SetAttribute dans tout le dump), donc
+-- rien ne vient l'ecraser derriere nous.
+--
+-- Reapplique en boucle plutot qu'une fois : le personnage est remplace a chaque
+-- respawn et les attributs partent avec lui.
+--
+-- Ne protege PAS des zones "Void" a mort instantanee (ex: Hyuga) - celles-la
+-- sont un Script serveur, aucune technique client n'y change quoi que ce soit
+-- (voir la note sur l'anti-brulage Lavarossa plus bas).
+local setNoFallDamage
+do
+	local active = false
+	setNoFallDamage = function(state)
+		FeatureState.AntiFallDamage = state
+		active = state
+		if not state then
+			local character = LocalPlayer.Character
+			if character then
+				pcall(function() character:SetAttribute("FallDamageImmunity", nil) end)
+			end
+			return
+		end
+
+		task.spawn(function()
+			while active and not unloaded do
+				local character = LocalPlayer.Character
+				if character then
+					pcall(function() character:SetAttribute("FallDamageImmunity", true) end)
+				end
+				task.wait(0.5)
+			end
+		end)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- No Kill Bricks.
+--
+-- Deux familles de degats de contact : celles que le client s'inflige lui-meme
+-- via son handler Touched (data.lua ~L15813 - lave, poison, verre, feux,
+-- torches) et celles qu'un Script SERVEUR pose sur la part applique (les 96
+-- parts taguees "Void", RunContext Legacy, bytecode jamais envoye au client).
+--
+-- Le point qui traite les deux d'un coup : ce contact est detecte par le
+-- CLIENT, pas par le serveur. Une part ancree ne simule rien ; c'est la machine
+-- qui possede le personnage qui calcule le contact et le REPLIQUE - c'est tout
+-- le role du TouchTransmitter "TouchInterest" pose dans chaque part concernee.
+--
+-- Consequence : il suffit de mettre CanTouch = false sur la part dangereuse. Un
+-- contact demande CanTouch des DEUX cotes, donc plus aucun evenement n'est
+-- produit, ni chez nous ni chez le serveur. Mesure sur une part Void du
+-- serveur : l'ecriture est acceptee depuis le client et tient (rien ne la
+-- retablit), comme toute propriete ecrite par le client - elle ne vaut que pour
+-- notre replique.
+--
+-- Ca couvre d'un coup les deux familles :
+--   - les parts a script SERVEUR (les 96 taguees "Void" : entrees Hyuga,
+--     ActualHyugaVoid, SandWormVoid, HakuArenaVoid) - leur Script tourne bien
+--     hors de portee, mais il attend un evenement qui ne partira plus ;
+--   - les parts a degats CLIENT (lave, poison, verre, feux, torches) - le
+--     handler Touched du jeu ne s'execute plus pour elles, donc aucun
+--     InflictFire / InflictPoison n'est envoye.
+--
+-- Une premiere version bloquait ces remotes via un hook __namecall. Abandonne :
+-- ca ne faisait pas le Void, c'etait plus fragile (un simple appel de methode
+-- dans le corps du hook partait en recursion sur tous les namecalls du jeu et
+-- cassait camera et personnage), et CanTouch fait strictement mieux.
+--
+-- On ne touche QUE ce qui blesse. Les plaques (StepPlate), les sols
+-- d'activation de boss (LavarossaFloor, MandaFloor...) et les voidPath sont des
+-- mecaniques : les neutraliser casserait le jeu.
+local setNoKillBricks
+do
+	local V = {
+		CS = game:GetService("CollectionService"),
+		-- Parts dangereuses reperees par leur nom exact.
+		names = {
+			Lava = true, LavarossaVoid = true, PoisonFloor = true,
+			BlackFire = true, GreenFire = true, BlueFire = true, PurpleFire = true,
+		},
+		active = false,
+		saved = {},  -- part -> CanTouch d'origine, pour pouvoir tout rendre
+		conns = {},
+	}
+
+	function V.isKillPart(part)
+		if not part:IsA("BasePart") then return false end
+		if V.names[part.Name] then return true end
+		if part.Name:sub(1, 11) == "PoisonGlass" then return true end
+		if part:FindFirstChild("Burning") then return true end
+		-- Torches : c'est la part "Main" du modele qui brule.
+		if part.Name == "Main" then
+			local parentName = part.Parent and part.Parent.Name
+			if parentName == "Torch" or parentName == "NightTorch" then return true end
+		end
+		return V.CS:HasTag(part, "Void")
+	end
+
+	function V.neutralize(part)
+		if V.saved[part] ~= nil then return end
+		local ok, current = pcall(function() return part.CanTouch end)
+		if not ok then return end
+		V.saved[part] = current
+		pcall(function() part.CanTouch = false end)
+	end
+
+	function V.restore()
+		for part, original in pairs(V.saved) do
+			pcall(function() part.CanTouch = original end)
+		end
+		V.saved = {}
+	end
+
+	function V.sweep()
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if V.isKillPart(d) then V.neutralize(d) end
+		end
+	end
+
+	setNoKillBricks = function(state)
+		FeatureState.NoKillBricks = state
+		V.active = state
+
+		for _, conn in ipairs(V.conns) do
+			pcall(function() conn:Disconnect() end)
+		end
+		V.conns = {}
+
+		if not state then
+			V.restore()
+			local character = LocalPlayer.Character
+			if character then
+				pcall(function() character:SetAttribute("VoidResistance", nil) end)
+			end
+			return
+		end
+
+		pcall(V.sweep)
+
+		-- Les parts dangereuses apparaissent en cours de partie : torches
+		-- chargees par le streaming, feux poses par les sorts des autres, void
+		-- d'une arene qui s'ouvre. Un balayage unique ne suffit donc pas.
+		table.insert(V.conns, track(workspace.DescendantAdded:Connect(function(d)
+			if V.active and V.isKillPart(d) then V.neutralize(d) end
+		end)))
+
+		-- L'attribut natif en plus : redondant avec CanTouch pour la lave, mais
+		-- gratuit, et c'est la seule protection qui resterait si un jour le jeu
+		-- se mettait a verifier ses contacts autrement.
+		task.spawn(function()
+			while V.active and not unloaded do
+				local character = LocalPlayer.Character
+				if character then
+					pcall(function() character:SetAttribute("VoidResistance", true) end)
+				end
+				task.wait(0.5)
+			end
+			-- Au dechargement du script, rendre le monde tel qu'on l'a trouve.
+			if unloaded then V.restore() end
+		end)
+	end
 end
 
 local noclipConn = nil
@@ -4328,6 +4580,20 @@ do
 			Settings.FlySpeed = v
 		end)
 
+		FEATURE_CONTROLS.AntiFallDamage = addToggleRow(MovementSection, "No Fall Damage", FeatureState.AntiFallDamage, function(state)
+			setNoFallDamage(state)
+			Settings.AntiFallDamage = state
+		end)
+		attachTooltip(FEATURE_CONTROLS.AntiFallDamage.Row, "Annule les degats de chute en posant l'attribut FallDamageImmunity que le jeu teste lui-meme : le calcul est abandonne avant l'envoi au serveur, donc rien ne part. Sans effet sur les zones Void a mort instantanee.")
+		KeybindTool.bindToggle("AntiFallDamage", "No Fall Damage", FEATURE_CONTROLS.AntiFallDamage)
+
+		FEATURE_CONTROLS.NoKillBricks = addToggleRow(MovementSection, "No Kill Bricks", FeatureState.NoKillBricks, function(state)
+			setNoKillBricks(state)
+			Settings.NoKillBricks = state
+		end)
+		attachTooltip(FEATURE_CONTROLS.NoKillBricks.Row, "Passe les parts dangereuses en CanTouch = false : plus aucun contact n'est produit ni replique. Couvre le Void a mort instantanee (Hyuga, SandWorm, Haku) dont le script est pourtant serveur, la lave, le poison, le verre empoisonne, les feux et les torches. Les plaques et les sols d'activation de boss ne sont pas touches. Tout est rendu a son etat d'origine en decochant.")
+		KeybindTool.bindToggle("NoKillBricks", "No Kill Bricks", FEATURE_CONTROLS.NoKillBricks)
+
 	end
 
 	do
@@ -5331,6 +5597,33 @@ do
 		-- Cherche un boss precis par son nom (voir M.findBoss - separee pour
 		-- pouvoir prioriser explicitement state.lastBossName avant de scanner
 		-- tous les autres boss configures).
+		-- "Skip if Player Nearby" : nom du premier joueur VIVANT (autre que nous)
+		-- a moins de AutoBossSkipRadius studs du boss, ou nil. Un boss qu'un
+		-- joueur est en train de camper est un boss qu'on laisse tomber - c'est
+		-- lui qui nous verrait voler, taper dans le vide et grip a repetition.
+		--
+		-- Le filtre PV > 0 est indispensable : un joueur tue par le boss laisse
+		-- son cadavre sur place plusieurs secondes, et sans ce test il
+		-- condamnerait le boss alors qu'il ne regarde plus rien.
+		function M.playerNearBoss(boss)
+			if not Settings.AutoBossSkipIfPlayerNearby then return nil end
+			local bossRoot = boss and boss:FindFirstChild("HumanoidRootPart")
+			if not bossRoot then return nil end
+			local radius = Settings.AutoBossSkipRadius or 150
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					local character = player.Character
+					local theirRoot = character and character:FindFirstChild("HumanoidRootPart")
+					local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+					if theirRoot and humanoid and humanoid.Health > 0
+						and (theirRoot.Position - bossRoot.Position).Magnitude <= radius then
+						return player.Name
+					end
+				end
+			end
+			return nil
+		end
+
 		function M.findBossByName(name)
 			local config = BOSS_CONFIGS[name]
 			if not (config and Settings.AutoBossSelected[name]) then return nil end
@@ -5345,7 +5638,7 @@ do
 						local hrp = model:FindFirstChild("HumanoidRootPart")
 						positionOk = hrp ~= nil and (hrp.Position - spawnFloor.Position).Magnitude <= (config.spawnRadius or 500)
 					end
-					if healthOk and positionOk then
+					if healthOk and positionOk and not M.playerNearBoss(model) then
 						return model, config
 					end
 				end
@@ -5559,7 +5852,7 @@ do
 			end
 
 			while os.clock() < deadline do
-				if Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive() then return end
+				if ChakraSenseThreat.bossPauseReason() then return end
 				local mob, humanoid = nextMob()
 				if not mob then break end
 
@@ -5615,7 +5908,7 @@ do
 			if #spawns == 0 then return "done" end
 
 			local function threatened()
-				return Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive()
+				return ChakraSenseThreat.bossPauseReason() ~= nil
 			end
 
 			-- Boucle unique, pilotee par ce qui est REELLEMENT au sol, au lieu de
@@ -6128,7 +6421,12 @@ do
 					end)
 					local panicActive = Settings.PanicHealEnabled and myHealthPercent <= Settings.PanicHealThreshold
 
-					local threatActive = Settings.AutoBossPauseOnChakraSense and isChakraSenseThreatActive()
+					-- Deux detections derriere une seule raison : le sort LANCE
+					-- (ChakraSenseThreat.lastSeen) et le sort SELECTIONNE en main
+					-- ("Chakra Sense +"). Le texte renvoye dit laquelle des deux a
+					-- parle, et part tel quel dans le HUD et la notif.
+					local threatReason = ChakraSenseThreat.bossPauseReason()
+					if threatReason then state.threatReason = threatReason end
 
 					if panicActive then
 						state.resumeDeadline = nil
@@ -6143,7 +6441,7 @@ do
 						M.holdSafeSpot() -- a chaque tick, pas seulement a l'entree (voir M.holdSafeSpot)
 						M.setHudState(state.lastBossName or "None", string.format("PV bas (%d%%)", math.floor(myHealthPercent)), "Panic")
 						task.wait(0.3)
-					elseif threatActive then
+					elseif threatReason then
 						-- Se detacher NE veut pas dire que le boss est mort : on
 						-- peut tres bien etre en pleine baston quand la menace
 						-- apparait. Ne pas forcer lootPending ici - au reveil,
@@ -6158,11 +6456,11 @@ do
 						end
 						if not state.chakraSensePaused then
 							state.chakraSensePaused = true
-							notify("Chakra Sense detecte a proximite - pause Auto Boss, retour au Safe Spot.", "error")
+							notify(threatReason .. " - pause Auto Boss, retour au Safe Spot.", "error")
 							teleportToSafeSpot()
 						end
 						M.holdSafeSpot()
-						M.setHudState(state.lastBossName or "None", "Chakra Sense actif a proximite", "Paused")
+						M.setHudState(state.lastBossName or "None", threatReason, "Paused")
 						task.wait(0.5)
 					elseif state.chakraSensePaused then
 						-- Menace disparue, mais delai de securite avant de
@@ -6172,12 +6470,13 @@ do
 						state.resumeDeadline = state.resumeDeadline or (os.clock() + CHAKRA_SENSE_RESUME_DELAY_SECONDS)
 						if os.clock() < state.resumeDeadline then
 							M.holdSafeSpot() -- toujours en pause tant qu'on n'a pas repris
-							M.setHudState(state.lastBossName or "None", "Chakra Sense actif a proximite", "Resuming")
+							M.setHudState(state.lastBossName or "None", state.threatReason or "Chakra Sense", "Resuming")
 							task.wait(0.2)
 						else
 							state.chakraSensePaused = false
 							state.resumeDeadline = nil
-							notify("Plus de Chakra Sense detecte - reprise de l'Auto Boss.", "success")
+							state.threatReason = nil
+							notify("Plus de menace Chakra Sense - reprise de l'Auto Boss.", "success")
 						end
 					elseif state.panicPaused then
 						if myHealthPercent > Settings.PanicHealThreshold then
@@ -6205,6 +6504,31 @@ do
 							state.bossPresent = false
 							state.lastConfig = nil
 							state.lastBossName = nil
+						end
+
+						-- Meme abandon, mais provoque par un joueur qui arrive
+						-- PENDANT le combat : M.playerNearBoss ne filtre que la
+						-- recherche d'un nouveau boss (voir M.findBossByName), et
+						-- M.findCurrentBoss ne repasse volontairement aucun filtre
+						-- sur le boss deja engage - sans ce test, un boss commence
+						-- seul se continuerait jusqu'au bout sous les yeux du
+						-- nouvel arrivant.
+						--
+						-- On lache le boss en cours de route, PV entames compris.
+						-- C'est le sens de la demande : le boss se refera, pas la
+						-- discretion. Meme sequence que le decochage ci-dessus -
+						-- bossPresent a false AVANT que la branche "boss
+						-- introuvable" ne s'execute, sinon M.markBossGone
+						-- basculerait en phase loot pour un boss bien vivant.
+						if state.attached and state.lastBossName then
+							local intruder = M.playerNearBoss(M.findCurrentBoss())
+							if intruder then
+								M.detach()
+								state.bossPresent = false
+								state.lastConfig = nil
+								state.lastBossName = nil
+								notify(intruder .. " est pres du boss - on le laisse tomber.", "error")
+							end
 						end
 
 						-- Loot laisse en plan par une pause precedente : on finit
@@ -6439,6 +6763,18 @@ do
 		attachTooltip(FEATURE_CONTROLS.AutoBossEnabled.Row, "Vole au-dessus du boss, attaque, grip sous 50 PV, ramasse le loot et retourne au Safe Spot automatiquement.")
 		FEATURE_CONTROLS.AutoBossPauseOnChakraSense = addToggleRow(AutoBossSection, "Pause si Chakra Sense detecte", Settings.AutoBossPauseOnChakraSense, function(value)
 			Settings.AutoBossPauseOnChakraSense = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoBossPauseOnChakraSense.Row, "Pause quand quelqu'un LANCE Chakra Sense. Reprend 2 s apres la fin de la menace.")
+		FEATURE_CONTROLS.AutoBossPauseOnSenseItem = addToggleRow(AutoBossSection, "Chakra Sense +", Settings.AutoBossPauseOnSenseItem, function(value)
+			Settings.AutoBossPauseOnSenseItem = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoBossPauseOnSenseItem.Row, "Pause des que quelqu'un a Chakra Sense SELECTIONNE en main, sans attendre qu'il le lance - la pause d'au-dessus n'arrive qu'une fois qu'on est deja dans le champ. Portee serveur entiere : quelqu'un qui le laisse selectionne et s'en va maintient la pause tant qu'il reste connecte.")
+		FEATURE_CONTROLS.AutoBossSkipIfPlayerNearby = addToggleRow(AutoBossSection, "Skip if Player Nearby", Settings.AutoBossSkipIfPlayerNearby, function(value)
+			Settings.AutoBossSkipIfPlayerNearby = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.AutoBossSkipIfPlayerNearby.Row, "Ignore un boss tant qu'un autre joueur vivant se trouve dans le rayon ci-dessous, et lache celui qu'on combat deja si quelqu'un arrive. Attente au Safe Spot si tous les boss selectionnes sont occupes.")
+		FEATURE_CONTROLS.AutoBossSkipRadius = addSliderRow(AutoBossSection, "Rayon Skip if Player Nearby (studs)", 20, 500, Settings.AutoBossSkipRadius, 10, function(v)
+			Settings.AutoBossSkipRadius = v
 		end)
 		FEATURE_CONTROLS.PanicHealEnabled = addToggleRow(AutoBossSection, "Panic Heal", Settings.PanicHealEnabled, function(value)
 			Settings.PanicHealEnabled = value
