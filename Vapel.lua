@@ -486,6 +486,8 @@ local DEFAULT_FEATURES = {
 	AutoPowderEnabled = false,
 	AutoPowderHeight = 8,
 	AutoPowderEquipWeapon = false,
+	AutoPowderPauseOnChakraSense = true,
+	AutoPowderPauseOnSenseItem = true,
 	-- Desactive par defaut : apres un hop direct, le serveur peut ne jamais
 	-- repondre a InvokeServer("LoadedIn") (menu bloque, constate 2 fois sur 4).
 	AutoPowderHop = false,
@@ -5823,6 +5825,20 @@ do
 					end
 				end
 			end
+			-- Depuis la mise a jour du jeu (new_data1 L275 : "v = {", sans
+			-- local), la table d'etat est une GLOBALE du LocalScript et n'est
+			-- plus un upvalue de performM1 : sans ce repli, rien n'etait trouve
+			-- et Auto Equip Weapon ne faisait plus rien, en silence (constate).
+			if localState == nil then
+				pcall(function()
+					local clientScript = PlayerGui.ClientGui.LocalScript
+					local env = getsenv(clientScript)
+					local v = env and env.v
+					if type(v) == "table" and v.CombatType ~= nil and v.WeaponEquipped ~= nil then
+						localState = v
+					end
+				end)
+			end
 			if not (localState and gm and playerData) then return nil end
 			return localState, gm, playerData
 		end
@@ -7748,7 +7764,7 @@ do
 			-- chargement, donc apres un hop "Server Hop si pris" retombait a
 			-- false et le farm attendait au lieu de re-hopper (constate). Relues
 			-- ICI, avant la creation des toggles qui lisent Settings.
-			P.OPTION_KEYS = { "AutoPowderHop", "AutoPowderSkipNearby", "AutoPowderSkipRadius", "AutoPowderHeight", "AutoPowderEquipWeapon" }
+			P.OPTION_KEYS = { "AutoPowderHop", "AutoPowderSkipNearby", "AutoPowderSkipRadius", "AutoPowderHeight", "AutoPowderEquipWeapon", "AutoPowderPauseOnChakraSense", "AutoPowderPauseOnSenseItem" }
 			if type(Prefs.AutoPowderOptions) == "table" then
 				for _, key in ipairs(P.OPTION_KEYS) do
 					if Prefs.AutoPowderOptions[key] ~= nil then Settings[key] = Prefs.AutoPowderOptions[key] end
@@ -7932,7 +7948,16 @@ do
 						local panic = Settings.PanicHealEnabled and (healthPercent <= Settings.PanicHealThreshold
 							or (panicPaused and healthPercent < panicResume))
 						panicPaused = panic and true or false
-						local threat = ChakraSenseThreat.bossPauseReason()
+						-- Pause Chakra Sense avec les reglages PROPRES au farm (meme
+						-- detection qu'Auto Boss : sort lance a proximite, ou sort en
+						-- main n'importe ou sur le serveur).
+						local threat = nil
+						if Settings.AutoPowderPauseOnChakraSense and isChakraSenseThreatActive() then
+							threat = "Chakra Sense actif a proximite"
+						elseif Settings.AutoPowderPauseOnSenseItem then
+							local holder = ChakraSenseThreat.itemHolder()
+							if holder then threat = holder .. " a Chakra Sense en main" end
+						end
 
 						if not rootPart then
 							task.wait(0.5)
@@ -8154,6 +8179,16 @@ do
 				if value and state.powder then M.equipCurrentWeapon() end
 			end)
 			attachTooltip(FEATURE_CONTROLS.AutoPowderEquipWeapon.Row, "Reequipe ton arme actuelle (CurrentWeapon) au demarrage du farm et la remet en main si elle saute.")
+			FEATURE_CONTROLS.AutoPowderPauseOnChakraSense = addToggleRow(AutoPowderSection, "Pause si Chakra Sense detecte", Settings.AutoPowderPauseOnChakraSense, function(value)
+				Settings.AutoPowderPauseOnChakraSense = value
+				P.saveOptions()
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderPauseOnChakraSense.Row, "Pause au Safe Spot quand quelqu'un LANCE Chakra Sense a proximite. Reprend 2 s apres la fin de la menace.")
+			FEATURE_CONTROLS.AutoPowderPauseOnSenseItem = addToggleRow(AutoPowderSection, "Chakra Sense +", Settings.AutoPowderPauseOnSenseItem, function(value)
+				Settings.AutoPowderPauseOnSenseItem = value
+				P.saveOptions()
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderPauseOnSenseItem.Row, "Pause des que quelqu'un a Chakra Sense SELECTIONNE en main, n'importe ou sur le serveur. Plus prudent, mais met souvent le farm en pause.")
 
 			-- Reprise apres un server hop / rechargement (voir P.resumeOnLoad).
 			-- Petit delai : le reste du menu finit de se construire.
