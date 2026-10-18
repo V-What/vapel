@@ -7873,7 +7873,7 @@ do
 					local wave, target, lastMobSeen = false, nil, 0
 					local totalPowder, waves = 0, 0
 					local paused, resumeAt = false, nil
-					local button, busySince = nil, nil
+					local button, busySince, panicPaused = nil, nil, false
 					local function alive()
 						return P.token == myToken and state.token == engineToken and state.powder and not unloaded
 					end
@@ -7882,7 +7882,13 @@ do
 						local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 						local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 						local healthPercent = (humanoid and humanoid.MaxHealth > 0) and humanoid.Health / humanoid.MaxHealth * 100 or 100
-						local panic = Settings.PanicHealEnabled and healthPercent <= Settings.PanicHealThreshold
+						-- Hysteresis : une fois en pause PV bas, on attend 80 % avant de
+						-- repartir. Reprendre des que le seuil etait repasse (38 % pour
+						-- un seuil a 35) renvoyait au contact des 5 mobs presque sans PV.
+						local panicResume = math.max(80, Settings.PanicHealThreshold + 10)
+						local panic = Settings.PanicHealEnabled and (healthPercent <= Settings.PanicHealThreshold
+							or (panicPaused and healthPercent < panicResume))
+						panicPaused = panic and true or false
 						local threat = ChakraSenseThreat.bossPauseReason()
 
 						if not rootPart then
