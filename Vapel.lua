@@ -10528,8 +10528,13 @@ do
 	-- que ce soit : apres un hop on arrive sur l'ecran de menu, et injecter la
 	-- avant d'avoir clique Continue laissait un script a moitie charge.
 	local QUEUED = [==[
+-- Injecte tres tot apres le teleport : LocalPlayer peut encore etre nil
+-- (constate : "attempt to index nil with 'Name'" et pas de relance).
+if not game:IsLoaded() then game.Loaded:Wait() end
 local RS = game:GetService("ReplicatedStorage")
-local plr = game:GetService("Players").LocalPlayer
+local Players = game:GetService("Players")
+while not Players.LocalPlayer do task.wait(0.2) end
+local plr = Players.LocalPlayer
 local deadline = os.clock() + 180
 while os.clock() < deadline do
 	local settings = RS:FindFirstChild("Settings")
