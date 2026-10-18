@@ -488,6 +488,8 @@ local DEFAULT_FEATURES = {
 	-- Desactive par defaut : apres un hop direct, le serveur peut ne jamais
 	-- repondre a InvokeServer("LoadedIn") (menu bloque, constate 2 fois sur 4).
 	AutoPowderHop = false,
+	AutoPowderSkipNearby = false,
+	AutoPowderSkipRadius = 150,
 	AutoBossPauseOnChakraSense = true,
 	-- Chakra Sense + : pause sur le sort SELECTIONNE en main, sans attendre
 	-- qu'il soit lance (voir ChakraSenseThreat.itemHolder).
@@ -7740,6 +7742,24 @@ do
 				resumeOnLoad = Prefs.AutoPowderResume == true,
 			}
 
+			-- Options du farm sauvegardees dans les preferences (fichier) : les
+			-- reglages "cheat" repartent des valeurs par defaut a chaque
+			-- chargement, donc apres un hop "Server Hop si pris" retombait a
+			-- false et le farm attendait au lieu de re-hopper (constate). Relues
+			-- ICI, avant la creation des toggles qui lisent Settings.
+			P.OPTION_KEYS = { "AutoPowderHop", "AutoPowderSkipNearby", "AutoPowderSkipRadius", "AutoPowderHeight" }
+			if type(Prefs.AutoPowderOptions) == "table" then
+				for _, key in ipairs(P.OPTION_KEYS) do
+					if Prefs.AutoPowderOptions[key] ~= nil then Settings[key] = Prefs.AutoPowderOptions[key] end
+				end
+			end
+			function P.saveOptions()
+				local options = {}
+				for _, key in ipairs(P.OPTION_KEYS) do options[key] = Settings[key] end
+				Prefs.AutoPowderOptions = options
+				savePrefs()
+			end
+
 			function P.getButton()
 				local parkour = workspace:FindFirstChild("GaaraParkour")
 				local buttons = parkour and parkour:FindFirstChild("Buttons")
@@ -7760,6 +7780,26 @@ do
 					button = P.getButton()
 					if button then return button end
 					task.wait(0.2)
+				end
+				return nil
+			end
+
+			-- Skip if Player Nearby : nom du premier autre joueur vivant dans le
+			-- rayon autour du bouton, ou nil. character.Parent : un perso
+			-- decharge (streaming) garde une position perimee, on l'ignore.
+			function P.playerNearby()
+				if not Settings.AutoPowderSkipNearby then return nil end
+				local radius = Settings.AutoPowderSkipRadius or 150
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player ~= LocalPlayer then
+						local character = player.Character
+						local theirRoot = character and character.Parent and character:FindFirstChild("HumanoidRootPart")
+						local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+						if theirRoot and humanoid and humanoid.Health > 0
+							and (theirRoot.Position - P.BUTTON_POS).Magnitude <= radius then
+							return player.Name
+						end
+					end
 				end
 				return nil
 			end
@@ -7932,9 +7972,31 @@ do
 								if button then P.goToButton() end
 							end
 							local mobs = button and P.mobs(button) or {}
+							local intruder = button and P.playerNearby()
 							if not button then
 								notify("Bouton " .. P.BUTTON_NAME .. " introuvable, nouvel essai...", "error")
 								task.wait(2)
+							elseif intruder then
+								-- Joueur pres du bouton : on lache tout (vague comprise),
+								-- on ramasse nos drops deja au sol, puis meme regle que
+								-- le bouton pris : 5 s puis hop si active, sinon on attend.
+								if state.attached then M.detach() end
+								target, wave = nil, false
+								if #P.drops(button) > 0 then
+									totalPowder = totalPowder + P.collect(button)
+								end
+								busySince = busySince or os.clock()
+								local waited = os.clock() - busySince
+								if Settings.AutoPowderHop and waited >= 5 then
+									M.setHudState("Golden Desertoid", intruder .. " proche", "Server Hop")
+									notify(intruder .. " est pres du bouton - changement de serveur.", "error")
+									if P.hop() then task.wait(20) end
+									busySince = os.clock()
+								else
+									M.setHudState("Golden Desertoid", string.format("%s proche (%ds)", intruder, math.floor(waited)), "Waiting")
+									P.goToButton()
+									task.wait(0.5)
+								end
 							elseif #mobs > 0 then
 								busySince = nil
 								wave = true
@@ -8066,10 +8128,21 @@ do
 			attachTooltip(FEATURE_CONTROLS.AutoPowderEnabled.Row, "Se teleporte au bouton du parkour de Gaara, l'active, tue les Golden Desertoid par au-dessus, ramasse les Golden Switchpowder (30 % par mob) et recommence. Reste actif apres un server hop ou un rechargement. Utilise Panic Heal, la pause Chakra Sense et Auto Equip Weapon d'Auto Boss.")
 			FEATURE_CONTROLS.AutoPowderHop = addToggleRow(AutoPowderSection, "Server Hop si le bouton est deja pris", Settings.AutoPowderHop, function(value)
 				Settings.AutoPowderHop = value
+				P.saveOptions()
 			end)
-			attachTooltip(FEATURE_CONTROLS.AutoPowderHop.Row, "Bouton deja presse depuis 5 s sans nos mobs : change de serveur, clique Continue et relance le farm a l'arrivee.")
+			FEATURE_CONTROLS.AutoPowderSkipNearby = addToggleRow(AutoPowderSection, "Skip if Player Nearby", Settings.AutoPowderSkipNearby, function(value)
+				Settings.AutoPowderSkipNearby = value
+				P.saveOptions()
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderSkipNearby.Row, "Un autre joueur pres du bouton : on lache la vague (drops deja au sol ramasses), puis server hop apres 5 s si l'option ci-dessus est active, sinon on attend qu'il parte.")
+			FEATURE_CONTROLS.AutoPowderSkipRadius = addSliderRow(AutoPowderSection, "Rayon Skip if Player Nearby (studs)", 20, 500, Settings.AutoPowderSkipRadius, 10, function(v)
+				Settings.AutoPowderSkipRadius = v
+				P.saveOptions()
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderHop.Row,"Bouton deja presse depuis 5 s sans nos mobs : change de serveur, clique Continue et relance le farm a l'arrivee.")
 			FEATURE_CONTROLS.AutoPowderHeight = addSliderRow(AutoPowderSection, "Hauteur au-dessus des mobs (studs)", 3, 15, Settings.AutoPowderHeight, 1, function(v)
 				Settings.AutoPowderHeight = v
+				P.saveOptions()
 			end)
 
 			-- Reprise apres un server hop / rechargement (voir P.resumeOnLoad).
