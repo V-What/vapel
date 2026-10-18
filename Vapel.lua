@@ -257,6 +257,7 @@ local DEFAULT_PREFS = {
 	ShowKeybindHud = false,
 	MenuTheme = "Ambre",
 	AutoRunAfterTeleport = false, -- relancer le script apres un changement de serveur
+	AutoPowderResume = false, -- Auto Golden Powder actif : clique Continue et le relance apres un hop
 }
 
 local Prefs = {}
@@ -484,6 +485,7 @@ local DEFAULT_FEATURES = {
 	AutoGaaraEnabled = false,
 	AutoPowderEnabled = false,
 	AutoPowderHeight = 6,
+	AutoPowderHop = true,
 	AutoBossPauseOnChakraSense = true,
 	-- Chakra Sense + : pause sur le sort SELECTIONNE en main, sans attendre
 	-- qu'il soit lance (voir ChakraSenseThreat.itemHolder).
@@ -7723,23 +7725,63 @@ do
 		--     par fireclickdetector a ~5 studs (teste : l'item part aussitot).
 		-- Un seul local (P) pour la limite des 200 registres.
 		do
-			local P = { token = 0, button = nil }
+			-- Bouton des Golden Desertoid et position de son ActivationButton
+			-- (mesuree en jeu). Le bouton n'est pas charge tant qu'on est loin
+			-- (StreamingEnabled) : RequestStreamAroundAsync le fait venir, ca
+			-- marche pour le decor (pas pour les persos des autres joueurs).
+			-- resumeOnLoad : lu ICI, avant qu'un chargement de config ne remette
+			-- le toggle a false et n'efface la preference.
+			local P = {
+				token = 0,
+				BUTTON_NAME = "GaaraButton4",
+				BUTTON_POS = Vector3.new(5261.24, -149.21, 270.97),
+				resumeOnLoad = Prefs.AutoPowderResume == true,
+			}
 
-			function P.findButton()
-				local character = LocalPlayer.Character
-				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			function P.getButton()
 				local parkour = workspace:FindFirstChild("GaaraParkour")
 				local buttons = parkour and parkour:FindFirstChild("Buttons")
-				if not (rootPart and buttons) then return nil end
-				local best, bestDistance = nil, 300
-				for _, button in ipairs(buttons:GetChildren()) do
-					local part = button:FindFirstChild("ActivationButton")
-					if part and button:FindFirstChild("Activated") then
-						local distance = (part.Position - rootPart.Position).Magnitude
-						if distance < bestDistance then best, bestDistance = button, distance end
-					end
+				local button = buttons and buttons:FindFirstChild(P.BUTTON_NAME)
+				if button and button:FindFirstChild("ActivationButton") and button:FindFirstChild("Activated") then
+					return button
 				end
-				return best
+				return nil
+			end
+
+			-- Le bouton, en le faisant charger au besoin (jusqu'a 6 s).
+			function P.findButton()
+				local button = P.getButton()
+				if button then return button end
+				pcall(function() LocalPlayer:RequestStreamAroundAsync(P.BUTTON_POS, 5) end)
+				local deadline = os.clock() + 6
+				while os.clock() < deadline do
+					button = P.getButton()
+					if button then return button end
+					task.wait(0.2)
+				end
+				return nil
+			end
+
+			function P.goToButton()
+				local character = LocalPlayer.Character
+				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+				if rootPart then M.teleportRootPart(rootPart, P.BUTTON_POS + Vector3.new(0, 4, 0)) end
+			end
+
+			-- Server hop (bouton deja pris) : la preference AutoPowderResume fait
+			-- cliquer Continue et relancer le farm de l'autre cote (voir QUEUED
+			-- dans la section Server Hop et la reprise en bas de ce bloc). La
+			-- relance apres teleport est forcee : sans elle rien ne repart.
+			function P.hop()
+				Prefs.AutoPowderResume = true
+				Prefs.AutoRunAfterTeleport = true
+				savePrefs()
+				local hop = ((getgenv and getgenv()) or _G).__VonHop
+				if not hop then
+					notify("Server Hop indisponible.", "error")
+					return false
+				end
+				return hop()
 			end
 
 			-- Mobs vivants de CE bouton (attribut au nom du bouton).
@@ -7759,7 +7801,7 @@ do
 			-- Nos drops au sol autour du bouton (StringValue a notre nom).
 			function P.drops(button)
 				local list = {}
-				local center = button.ActivationButton.Position
+				local center = P.BUTTON_POS
 				for _, obj in ipairs(workspace:GetChildren()) do
 					if obj:IsA("BasePart") and obj:FindFirstChild(LocalPlayer.Name) then
 						local detector = obj:FindFirstChild("ItemDetector")
@@ -7808,11 +7850,6 @@ do
 					notify("Executeur sans fireclickdetector : impossible de ramasser la Golden Powder.", "error")
 					return false
 				end
-				local button = P.findButton()
-				if not button then
-					notify("Aucun bouton du parkour de Gaara a moins de 300 studs. Va pres du bouton (GaaraButton) puis relance.", "error")
-					return false
-				end
 				local canM1, performM1 = M.getCombatFns()
 				if not (canM1 and performM1) then
 					notify("Impossible de recuperer les fonctions de combat (canM1/performM1).", "error")
@@ -7827,16 +7864,16 @@ do
 				state.powder = true
 				P.token = P.token + 1
 				local myToken, engineToken = P.token, state.token
-				P.button = button
 				M.watchHealth()
 				M.ensureHud().Root.Visible = true
-				M.setHudState("Golden Desertoid", button.Name, "Waiting")
+				M.setHudState("Golden Desertoid", P.BUTTON_NAME, "Waiting")
 				if Settings.AutoEquipWeaponEnabled then M.equipCurrentWeapon() end
 
 				task.spawn(function()
 					local wave, target, lastMobSeen = false, nil, 0
 					local totalPowder, waves = 0, 0
 					local paused, resumeAt = false, nil
+					local button, busySince = nil, nil
 					local function alive()
 						return P.token == myToken and state.token == engineToken and state.powder and not unloaded
 					end
@@ -7877,8 +7914,21 @@ do
 								notify("Reprise de l'Auto Golden Powder.", "success")
 							end
 							if Settings.AutoEquipWeaponEnabled then M.reassertWeapon() end
-							local mobs = P.mobs(button)
-							if #mobs > 0 then
+							-- Bouton absent (premier tour, ou decharge pendant une
+							-- pause au Safe Spot) : on y va et on le fait charger.
+							if not (button and button.Parent and button:FindFirstChild("ActivationButton")) then
+								M.setHudState("Golden Desertoid", "Trajet vers le bouton", "Waiting")
+								if state.attached then M.detach() end
+								P.goToButton()
+								button = P.findButton()
+								if button then P.goToButton() end
+							end
+							local mobs = button and P.mobs(button) or {}
+							if not button then
+								notify("Bouton " .. P.BUTTON_NAME .. " introuvable, nouvel essai...", "error")
+								task.wait(2)
+							elseif #mobs > 0 then
+								busySince = nil
 								wave = true
 								lastMobSeen = os.clock()
 								-- Garde la cible tant qu'elle vit, sinon la plus proche.
@@ -7909,6 +7959,7 @@ do
 									-- est deja exclu de P.mobs) : 2.5 s de calme avant de
 									-- ramasser, en tenant la position pres du bouton.
 									M.setHudState("Golden Desertoid", "Fin de vague", "Looting")
+									busySince = nil
 									if os.clock() - lastMobSeen > 2.5 then
 										local got = P.collect(button)
 										totalPowder = totalPowder + got
@@ -7916,14 +7967,16 @@ do
 										wave = false
 										notify(string.format("Vague %d : %d Golden Switchpowder (total %d).", waves, got, totalPowder), "success")
 									else
-										M.teleportRootPart(rootPart, button.ActivationButton.Position + Vector3.new(0, 4, 0))
+										P.goToButton()
 									end
 								elseif #P.drops(button) > 0 then
 									-- Drops restes d'une vague precedente (pause, relance).
+									busySince = nil
 									totalPowder = totalPowder + P.collect(button)
 								elseif button.Activated.Value == false then
+									busySince = nil
 									M.setHudState("Golden Desertoid", button.Name, "Spawning")
-									M.teleportRootPart(rootPart, button.ActivationButton.Position + Vector3.new(0, 4, 0))
+									P.goToButton()
 									task.wait(0.2)
 									local DataEvent = M.getDataEvent()
 									if DataEvent then
@@ -7937,10 +7990,24 @@ do
 									end
 								else
 									-- Bouton deja actif sans nos mobs : vague d'un autre
-									-- joueur ou temps de recharge. On attend a cote.
-									M.setHudState("Golden Desertoid", "Bouton occupe/recharge", "Waiting")
-									M.teleportRootPart(rootPart, button.ActivationButton.Position + Vector3.new(0, 4, 0))
-									task.wait(1)
+									-- joueur ou longue recharge (constate : plus de 5 min).
+									-- 5 s d'attente a cote, puis server hop si active.
+									busySince = busySince or os.clock()
+									local waited = os.clock() - busySince
+									P.goToButton()
+									if Settings.AutoPowderHop and waited >= 5 then
+										M.setHudState("Golden Desertoid", "Bouton pris", "Server Hop")
+										notify("Bouton deja presse - changement de serveur.", "error")
+										if P.hop() then
+											-- Le teleport prend quelques secondes ; s'il
+											-- echoue, on retente apres ce delai.
+											task.wait(20)
+										end
+										busySince = os.clock()
+									else
+										M.setHudState("Golden Desertoid", string.format("Bouton pris (%ds)", math.floor(waited)), "Waiting")
+										task.wait(0.5)
+									end
 								end
 							end
 						end
@@ -7960,6 +8027,12 @@ do
 			local AutoPowderSection = addSection(AutoPage, "Auto Golden Powder")
 			FEATURE_CONTROLS.AutoPowderEnabled = addToggleRow(AutoPowderSection, "Auto Golden Powder", Settings.AutoPowderEnabled, function(value)
 				Settings.AutoPowderEnabled = value
+				-- Memorise dans les preferences (fichier) que le farm tourne :
+				-- apres un server hop ou un rechargement, il repart tout seul.
+				if Prefs.AutoPowderResume ~= value then
+					Prefs.AutoPowderResume = value
+					savePrefs()
+				end
 				if value then
 					local bossControl = FEATURE_CONTROLS.AutoBossEnabled
 					if bossControl and bossControl.Get() then bossControl.Set(false) end
@@ -7975,10 +8048,26 @@ do
 					P.stop()
 				end
 			end)
-			attachTooltip(FEATURE_CONTROLS.AutoPowderEnabled.Row, "A lancer pres d'un bouton du parkour de Gaara : appuie, tue les Golden Desertoid par au-dessus, ramasse les Golden Switchpowder (30 % par mob) et recommence. Utilise Panic Heal, la pause Chakra Sense et Auto Equip Weapon d'Auto Boss.")
+			attachTooltip(FEATURE_CONTROLS.AutoPowderEnabled.Row, "Se teleporte au bouton du parkour de Gaara, l'active, tue les Golden Desertoid par au-dessus, ramasse les Golden Switchpowder (30 % par mob) et recommence. Reste actif apres un server hop ou un rechargement. Utilise Panic Heal, la pause Chakra Sense et Auto Equip Weapon d'Auto Boss.")
+			FEATURE_CONTROLS.AutoPowderHop = addToggleRow(AutoPowderSection, "Server Hop si le bouton est deja pris", Settings.AutoPowderHop, function(value)
+				Settings.AutoPowderHop = value
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderHop.Row, "Bouton deja presse depuis 5 s sans nos mobs : change de serveur, clique Continue et relance le farm a l'arrivee.")
 			FEATURE_CONTROLS.AutoPowderHeight = addSliderRow(AutoPowderSection, "Hauteur au-dessus des mobs (studs)", 3, 15, Settings.AutoPowderHeight, 1, function(v)
 				Settings.AutoPowderHeight = v
 			end)
+
+			-- Reprise apres un server hop / rechargement (voir P.resumeOnLoad).
+			-- Petit delai : le reste du menu finit de se construire.
+			if P.resumeOnLoad then
+				task.delay(3, function()
+					local control = FEATURE_CONTROLS.AutoPowderEnabled
+					if not unloaded and control and not control.Get() then
+						notify("Reprise de l'Auto Golden Powder.", "success")
+						control.Set(true)
+					end
+				end)
+			end
 		end
 	end
 
@@ -10535,12 +10624,40 @@ local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 while not Players.LocalPlayer do task.wait(0.2) end
 local plr = Players.LocalPlayer
+local okPrefs, prefs = pcall(function()
+	return game:GetService("HttpService"):JSONDecode(readfile("von_client/prefs.json"))
+end)
+if not (okPrefs and type(prefs) == "table") then prefs = {} end
 -- 15 min pour passer le menu ; au-dela on ne charge PAS (charger sur le menu
 -- le bloque). Les conditions doivent tenir 3 s d'affilee : juste apres
 -- l'arrivee, ClientGui peut exister avant que le menu ne soit affiche.
 local deadline = os.clock() + 900
 local ready, stableSince = false, nil
+local menuSince, lastContinue = nil, 0
 while os.clock() < deadline do
+	-- Auto Golden Powder en cours (hop automatique) : on clique Continue
+	-- nous-memes, 2 s apres que le menu est pret (boutons branches), en
+	-- declenchant les connexions du bouton comme le ferait le clic. Continue
+	-- appelle LoadIntoGame(true) -> InvokeServer("LoadedIn").
+	if prefs.AutoPowderResume then
+		local pg = plr:FindFirstChild("PlayerGui")
+		local cg = pg and pg:FindFirstChild("ClientGui")
+		local ms = cg and cg:FindFirstChild("MenuScreen")
+		local menuFrame = ms and ms:FindFirstChild("Menu")
+		local continueBtn = menuFrame and menuFrame:FindFirstChild("Continue")
+		local okConns, conns = pcall(getconnections, continueBtn and continueBtn.MouseButton1Down)
+		if ms and ms.Visible and continueBtn and continueBtn.Visible and okConns and #conns > 0 then
+			menuSince = menuSince or os.clock()
+			if os.clock() - menuSince >= 2 and os.clock() - lastContinue >= 5 then
+				lastContinue = os.clock()
+				for _, connection in ipairs(conns) do
+					pcall(function() connection:Fire() end)
+				end
+			end
+		else
+			menuSince = nil
+		end
+	end
 	local settings = RS:FindFirstChild("Settings")
 	-- Le perso existe DEJA derriere l'ecran de menu : il faut aussi attendre
 	-- que le menu soit passe (Continue clique). Injecte pendant le menu, le
@@ -10563,10 +10680,11 @@ while os.clock() < deadline do
 	end
 	task.wait(0.5)
 end
-local ok, prefs = pcall(function()
+-- Relue ici : couper le toggle pendant le teleport doit annuler la relance.
+local ok, latest = pcall(function()
 	return game:GetService("HttpService"):JSONDecode(readfile("von_client/prefs.json"))
 end)
-if ready and ok and prefs and prefs.AutoRunAfterTeleport then
+if ready and ok and latest and latest.AutoRunAfterTeleport then
 	pcall(function()
 		loadstring(game:HttpGet("https://raw.githubusercontent.com/V-What/vapel/master/Vapel.lua"))()
 	end)
