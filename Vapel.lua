@@ -10535,20 +10535,38 @@ local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 while not Players.LocalPlayer do task.wait(0.2) end
 local plr = Players.LocalPlayer
-local deadline = os.clock() + 180
+-- 15 min pour passer le menu ; au-dela on ne charge PAS (charger sur le menu
+-- le bloque). Les conditions doivent tenir 3 s d'affilee : juste apres
+-- l'arrivee, ClientGui peut exister avant que le menu ne soit affiche.
+local deadline = os.clock() + 900
+local ready, stableSince = false, nil
 while os.clock() < deadline do
 	local settings = RS:FindFirstChild("Settings")
+	-- Le perso existe DEJA derriere l'ecran de menu : il faut aussi attendre
+	-- que le menu soit passe (Continue clique). Injecte pendant le menu, le
+	-- script du jeu n'avait branche aucun de ses boutons (0 connexion sur
+	-- Continue) et on restait bloque sur l'ecran.
+	local gui = plr:FindFirstChild("PlayerGui")
+	local clientGui = gui and gui:FindFirstChild("ClientGui")
+	local menu = clientGui and clientGui:FindFirstChild("MenuScreen")
+	local inMenu = (menu and menu.Visible) or workspace.CurrentCamera.CameraType == Enum.CameraType.Scriptable
 	if RS:FindFirstChild("GameManager")
 		and settings and settings:FindFirstChild(plr.Name)
-		and plr.Character then
-		break
+		and plr.Character and clientGui and not inMenu then
+		stableSince = stableSince or os.clock()
+		if os.clock() - stableSince >= 3 then
+			ready = true
+			break
+		end
+	else
+		stableSince = nil
 	end
 	task.wait(0.5)
 end
 local ok, prefs = pcall(function()
 	return game:GetService("HttpService"):JSONDecode(readfile("von_client/prefs.json"))
 end)
-if ok and prefs and prefs.AutoRunAfterTeleport then
+if ready and ok and prefs and prefs.AutoRunAfterTeleport then
 	pcall(function()
 		loadstring(game:HttpGet("https://raw.githubusercontent.com/V-What/vapel/master/Vapel.lua"))()
 	end)
