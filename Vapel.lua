@@ -477,6 +477,7 @@ local DEFAULT_FEATURES = {
 	AutoInfuseInterval = 15,
 	AutoEquipWeaponEnabled = false,
 	AutoBossEnabled = false,
+	AutoGaaraEnabled = false,
 	AutoBossPauseOnChakraSense = true,
 	-- Chakra Sense + : pause sur le sort SELECTIONNE en main, sans attendre
 	-- qu'il soit lance (voir ChakraSenseThreat.itemHolder).
@@ -5036,16 +5037,95 @@ do
 				lootWaitPosition = Vector3.new(-4703.2788, 336.9198, -2940.3208),
 				gripImmune = true,
 			},
+			-- Gaara : tout vient des dumps (new_data1/new_data2), RIEN n'a encore
+			-- ete mesure en live. Les hauteurs sont des estimations a ajuster.
+			--
+			-- GameManager.NPC.Gaara : 1500 PV, InstantDeath, CanBeGripped=false,
+			-- hyperarmor permanent, AttackRange 20. Quatre phases :
+			--   Stage2 (95%) et Stage3 (50%) : 4s d'animation INVINCIBLE ;
+			--   Stage4 (25%) : 4s assomme ("GaaraSealable"), puis si personne ne
+			--   le scelle, Shukaku (400 PV) apparait sur GaaraPlatform avec Gaara
+			--   soude sur la tete - voir la config Shukaku juste en dessous.
+			--
+			-- Deux versions possibles, meme modele "Gaara" :
+			--   - quete "Gourd Mastery" (mode Auto Gaara) : StartQuest pres du PNJ
+			--     de dialogue, qui passe alors en combat ;
+			--   - world boss eventuel (rotation Auto Boss) : aucun declencheur dans
+			--     le client (pas de GaaraFloor/activateGaara), donc s'il existe il
+			--     apparait cote serveur. Decoche par defaut tant que pas confirme.
+			--
+			-- attachOffset 6 et pas 10-12 comme les autres : Gaara est de taille
+			-- humaine. Plus haut, le rayon de 9 studs du detecteur de chute du jeu
+			-- (piege "BanMe 2E") ne le touche plus et son compteur "en l'air"
+			-- tourne en continu.
+			--
+			-- Esquives :
+			--   - HandsToTheGround (6894770447) : Gaara Storm (boite +-20 studs
+			--     CENTREE SUR GAARA, 0.4s + 8x0.5s), Sand Tsunami, Quicksand, Sand
+			--     Masoleum ;
+			--   - GaaraIdle (94121863998004) : Sand Shield (rayon 16, 5s) et les
+			--     transitions de phase ;
+			--   - SandCoffinWindup (115665387175091) : Sand Coffin.
+			--   +32 pour sortir du haut de la boite du Storm (+20) avec de la marge.
+			--   maxAirSeconds : on redescend au contact au bout de 4.5s d'esquive
+			--   continue, sinon on resterait plus de 5s en l'air sans rien dessous
+			--   (piege 2E). Une esquive plus longue est donc coupee 0.3s.
+			--   - Gaara_Scream (81987831020437) : rayon 125, 50 x 6 degats sur 10s.
+			--     Monter de 125+ studs = piege 2E quasi garanti, donc on va au Safe
+			--     Spot (au sol) a la place, s'il est a plus de 130 studs de Gaara.
+			Gaara = {
+				attachOffset = Vector3.new(0, 6, 0),
+				rewardsModel = "GaaraRewards", -- nom suppose (version WB), non verifie
+				requireCombat = true,
+				questNpc = true,
+				questName = "Gourd Mastery",
+				offByDefault = true,
+				gripImmune = true,
+				dodgeAnimationIds = { "6894770447", "94121863998004", "115665387175091" },
+				dodgeOffset = Vector3.new(0, 32, 0),
+				dodgeWindowSeconds = 4.6,
+				maxAirSeconds = 4.5,
+				farDodgeAnimationIds = { "81987831020437" },
+				farDodgeSeconds = 10.5,
+				farDodgeRadius = 130,
+			},
+			-- Shukaku de la phase 4 de Gaara UNIQUEMENT (attribut GaaraStage4 pose
+			-- par GameManager). Pas dans BOSS_NAMES : il suit la selection de
+			-- Gaara (linkedTo) et M.findBoss bascule dessus des qu'il apparait.
+			-- MaxHealth force a 400 par le jeu (3500 dans GameManager.NPC), d'ou
+			-- skipHealthCheck. BigChar : on se place au-dessus du HAUT de son
+			-- modele (attachAboveTop, recalcule toutes les 2s) plutot qu'a un
+			-- offset fixe depuis sa HumanoidRootPart, dont on ignore la hauteur.
+			--   - Shockwave (76596048370526) : montee de 20 ;
+			--   - Scream (114433999627506, rayon 125) et TBB (109359185160118) :
+			--     Safe Spot, comme le Scream de Gaara.
+			--   - Jump : pas d'esquive, on suit sa HumanoidRootPart.
+			Shukaku = {
+				linkedTo = "Gaara",
+				requireAttribute = "GaaraStage4",
+				skipHealthCheck = true,
+				attachAboveTop = 5,
+				attachOffset = Vector3.new(0, 0, 0),
+				rewardsModel = "GaaraRewards",
+				gripImmune = true,
+				dodgeAnimationIds = { "76596048370526" },
+				dodgeOffset = Vector3.new(0, 20, 0),
+				dodgeWindowSeconds = 2,
+				maxAirSeconds = 4.5,
+				farDodgeAnimationIds = { "114433999627506", "109359185160118" },
+				farDodgeSeconds = 10.5,
+				farDodgeRadius = 130,
+			},
 		}
 		-- Liste ordonnee pour le dropdown de selection (meme pattern que
 		-- GEM_NAMES/AutoInfuseGems) - a completer en meme temps que
 		-- BOSS_CONFIGS quand un boss est ajoute, pour la rota multi-boss.
-		local BOSS_NAMES = { "Tairock", "Lavarossa", "Chakra Knight", "Barbarit The Rose", "Hyuga Boss", "Manda", "Lava Snake", "Wooden Golem", "The Ringed Samurai" }
+		local BOSS_NAMES = { "Tairock", "Lavarossa", "Chakra Knight", "Barbarit The Rose", "Hyuga Boss", "Manda", "Lava Snake", "Wooden Golem", "The Ringed Samurai", "Gaara" }
 
 		Settings.AutoBossSelected = Settings.AutoBossSelected or {}
 		for _, name in ipairs(BOSS_NAMES) do
 			if Settings.AutoBossSelected[name] == nil then
-				Settings.AutoBossSelected[name] = true
+				Settings.AutoBossSelected[name] = not BOSS_CONFIGS[name].offByDefault
 			end
 		end
 
@@ -5057,7 +5137,7 @@ do
 		-- dodgeUntil : instant (os.clock) jusqu'auquel on reste en esquive, arme
 		-- au DEBUT de l'animation d'attaque - voir dodgeWindowSeconds et
 		-- M.isDodging.
-		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, collide = {}, comboHoldSince = nil, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, riseActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil }
+		local state = { enabled = false, attached = false, token = 0, healthConn = nil, hud = nil, lastGripAttempt = 0, collide = {}, comboHoldSince = nil, lastConfig = nil, lastBossName = nil, lootPending = false, chakraSensePaused = false, resumeDeadline = nil, bossPresent = false, lastSpawnAttempt = {}, dodging = false, dodgeActiveCount = 0, dodgeUntil = 0, riseActiveCount = 0, dodgeAnimConn = nil, gripping = false, deadSince = nil, lowHealthSince = nil, panicPaused = false, hudHp = nil, hudHpMax = nil, farDodgeUntil = 0, farDodgeActive = false, farDodgeWarned = false, airSince = nil, topOffset = nil, topOffsetAt = 0, questBoss = nil, lastQuestAttempt = 0, questAttempts = 0, questDone = false }
 
 		-- Valeur par defaut : 0, c'est-a-dire "on esquive tant que l'animation
 		-- joue, et pas une seconde de plus" - le comportement d'origine, qui
@@ -5624,15 +5704,49 @@ do
 			return nil
 		end
 
+		-- Selection d'un boss. En mode quete (Auto Gaara, state.questBoss) seul
+		-- ce boss compte, quelle que soit la selection de la rotation. linkedTo
+		-- (Shukaku de la phase 4) suit la selection du boss auquel il est lie.
+		function M.isSelected(name)
+			local config = BOSS_CONFIGS[name]
+			if config and config.linkedTo then name = config.linkedTo end
+			if state.questBoss then return name == state.questBoss end
+			return Settings.AutoBossSelected[name] == true
+		end
+
+		-- Filtres propres a certaines configs (Gaara/Shukaku) :
+		--   requireCombat : le PNJ de dialogue "Gaara" et le Gaara en combat
+		--     portent le meme nom - on ne prend que celui dont la valeur NPC
+		--     n'est plus "Dialog" (meme test que le client pour Might Guy) ;
+		--   requireAttribute : ex. GaaraStage4, pour ne pas confondre avec un
+		--     autre Shukaku ;
+		--   questNpc : attribut "Occupied" (UserId du joueur qui fait la quete,
+		--     meme mecanique que Third Kazekage dans le client) - on laisse
+		--     tranquille le combat de quete d'un autre joueur.
+		function M.passesFilters(model, config)
+			if config.requireCombat then
+				local npcValue = model:FindFirstChild("NPC")
+				if npcValue and npcValue.Value == "Dialog" then return false end
+			end
+			if config.requireAttribute and not model:GetAttribute(config.requireAttribute) then
+				return false
+			end
+			if config.questNpc then
+				local occupied = model:GetAttribute("Occupied")
+				if occupied and occupied ~= LocalPlayer.UserId then return false end
+			end
+			return true
+		end
+
 		function M.findBossByName(name)
 			local config = BOSS_CONFIGS[name]
-			if not (config and Settings.AutoBossSelected[name]) then return nil end
+			if not (config and M.isSelected(name)) then return nil end
 			local npcData = GameManager.NPC and GameManager.NPC[name]
 			local spawnFloor = config.spawnFloor and workspace:FindFirstChild(config.spawnFloor)
 			for _, model in ipairs(workspace:GetChildren()) do
-				if model.Name == name then
+				if model.Name == name and M.passesFilters(model, config) then
 					local humanoid = model:FindFirstChild("Humanoid")
-					local healthOk = humanoid and (not npcData or humanoid.MaxHealth == npcData.MaxHealth)
+					local healthOk = humanoid and (config.skipHealthCheck or not npcData or humanoid.MaxHealth == npcData.MaxHealth)
 					local positionOk = true
 					if healthOk and spawnFloor then
 						local hrp = model:FindFirstChild("HumanoidRootPart")
@@ -5655,12 +5769,30 @@ do
 		-- le filtre strict (MaxHealth) peut echouer momentanement PENDANT la
 		-- sequence de mort du cadavre encore present.
 		function M.findCurrentBoss()
-			if not (state.lastBossName and Settings.AutoBossSelected[state.lastBossName]) then
+			if not (state.lastBossName and M.isSelected(state.lastBossName)) then
 				return nil
 			end
-			local model = workspace:FindFirstChild(state.lastBossName)
-			if model and model:FindFirstChild("Humanoid") then
-				return model, BOSS_CONFIGS[state.lastBossName]
+			local config = BOSS_CONFIGS[state.lastBossName]
+			-- Filtres re-appliques ici (exception a la recherche "allegee") :
+			-- sans ca, un Gaara repasse en PNJ de dialogue apres le combat serait
+			-- encore "trouve" et on le taperait indefiniment.
+			for _, model in ipairs(workspace:GetChildren()) do
+				if model.Name == state.lastBossName and model:FindFirstChild("Humanoid")
+					and (not config or M.passesFilters(model, config)) then
+					return model, config
+				end
+			end
+			return nil
+		end
+
+		-- Boss lie (Shukaku de la phase 4) qui doit prendre le relais du boss
+		-- en cours, ou nil.
+		function M.findLinkedBoss(parentName)
+			for name, config in pairs(BOSS_CONFIGS) do
+				if config.linkedTo == parentName then
+					local model = M.findBossByName(name)
+					if model then return model, config end
+				end
 			end
 			return nil
 		end
@@ -5682,6 +5814,17 @@ do
 			-- M.start()) - c'est CA qui rouvre la recherche d'un nouveau
 			-- boss, pas juste le fait que l'ancien ait disparu.
 			if state.lastBossName then
+				-- Phase 4 de Gaara : Shukaku apparait et Gaara devient une piece
+				-- soudee sur sa tete (CanQuery=false) - on change de cible SANS
+				-- passer par markBossGone, Gaara n'est pas mort.
+				local linked, linkedConfig = M.findLinkedBoss(state.lastBossName)
+				if linked then
+					if state.attached then M.detach() end
+					notify(state.lastBossName .. " : " .. linked.Name .. " apparait, changement de cible.", "info")
+					state.lastBossName = linked.Name
+					state.lastConfig = linkedConfig
+					return linked, linkedConfig
+				end
 				return M.findCurrentBoss()
 			end
 
@@ -5705,7 +5848,7 @@ do
 		function M.trySpawnBoss()
 			local now = os.clock()
 			for name, config in pairs(BOSS_CONFIGS) do
-				if Settings.AutoBossSelected[name] and config.spawnFloor then
+				if M.isSelected(name) and config.spawnFloor then
 					local floor = workspace:FindFirstChild(config.spawnFloor)
 					local activated = floor and floor:FindFirstChild("Activated")
 					if floor and activated and activated.Value == "" then
@@ -5879,7 +6022,80 @@ do
 			end
 		end
 
+		-- Mode quete (Auto Gaara) : StartQuest sert a la fois a lancer et a
+		-- rendre une quete (voir "Missions" dans AutoProg plus bas), et le
+		-- serveur tranche selon notre position. Appele quand le boss de quete est
+		-- introuvable (pas encore lance, ou combat termine) :
+		--   - FinishedGood... -> on rend la quete chez le PNJ et on s'arrete ;
+		--   - sinon (Start / Ongoing apres une mort) -> StartQuest chez le PNJ,
+		--     comme le client a l'option "I'm ready." (StartQuest, nom, 1).
+		-- Gourd Mastery exige le bloodline Gaara + Sand/Iron Sand/Gold Dust
+		-- Mastery (Preconditions dans GameManager.Quests) : au bout de 4 essais
+		-- sans que le combat demarre, on abandonne avec un message.
+		-- Retourne true tant qu'il y a quelque chose a faire (HUD "Spawning").
+		function M.questStep()
+			local config = BOSS_CONFIGS[state.questBoss]
+			if not (config and config.questName) then return false end
+			local now = os.clock()
+			if now - state.lastQuestAttempt < 8 then return true end
+			state.lastQuestAttempt = now
+
+			local events = ReplicatedStorage:FindFirstChild("Events")
+			local dataFunction = events and events:FindFirstChild("DataFunction")
+			local character = LocalPlayer.Character
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			if not (dataFunction and rootPart) then return true end
+
+			-- Le PNJ de dialogue (meme nom que le boss) : le plus proche.
+			local npcRoot, bestDistance = nil, math.huge
+			for _, model in ipairs(workspace:GetChildren()) do
+				local hrp = model.Name == state.questBoss and model:FindFirstChild("HumanoidRootPart")
+				if hrp and not Players:GetPlayerFromCharacter(model) then
+					local distance = (hrp.Position - rootPart.Position).Magnitude
+					if distance < bestDistance then npcRoot, bestDistance = hrp, distance end
+				end
+			end
+			if not npcRoot then
+				notify(state.questBoss .. " introuvable dans workspace.", "error")
+				return false
+			end
+
+			local questName = config.questName
+			local okProgress, progress = pcall(function()
+				return dataFunction:InvokeServer("GetQuestProgress", questName, "DontComplete")
+			end)
+			progress = okProgress and tostring(progress) or ""
+
+			-- A 5 studs devant lui, au sol (detache : PlatformStand deja coupe).
+			M.teleportRootPart(rootPart, npcRoot.Position + npcRoot.CFrame.LookVector * 5)
+			task.wait(0.6)
+
+			if progress:find("Finished") then
+				pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
+				task.wait(0.3)
+				pcall(function() dataFunction:InvokeServer("StartQuest", questName, 1) end)
+				notify("Quete " .. questName .. " terminee et rendue.", "success")
+				state.questDone = true
+				return true
+			end
+
+			state.questAttempts = state.questAttempts + 1
+			if state.questAttempts > 4 then
+				notify("Le combat de " .. questName .. " ne demarre pas (statut : " .. progress
+					.. "). Il faut le bloodline Gaara + Sand/Iron Sand/Gold Dust Mastery.", "error")
+				state.questDone = true
+				return true
+			end
+			pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
+			task.wait(0.3)
+			pcall(function() dataFunction:InvokeServer("StartQuest", questName, 1) end)
+			return true
+		end
+
 		function M.collectLoot(config)
+			-- Combat de quete : pas de modele de recompenses, la recompense passe
+			-- par la remise de la quete (M.questStep).
+			if state.questBoss then return "done" end
 			if not (config and config.rewardsModel) then return "done" end
 			local rewards = workspace:FindFirstChild(config.rewardsModel)
 			if not rewards then
@@ -6097,7 +6313,46 @@ do
 		-- apres (DODGE_HOLD_SECONDS). Tout le reste du module doit passer par ici
 		-- plutot que de lire state.dodging directement, sinon la marge est ignoree.
 		function M.isDodging()
-			return state.dodgeActiveCount > 0 or os.clock() < state.dodgeUntil
+			return state.dodgeActiveCount > 0 or os.clock() < state.dodgeUntil or state.farDodgeActive
+		end
+
+		-- farDodgeAnimationIds (Scream de Gaara/Shukaku, rayon 125) : repli au
+		-- Safe Spot, au sol, plutot qu'une montee de 125+ studs qui laisserait
+		-- plus de 5s en l'air sans rien dessous (piege "BanMe 2E" du client).
+		-- Seulement si le Safe Spot est hors de portee (farDodgeRadius) - sinon
+		-- on reste au contact et on previent une fois par accroche.
+		function M.farDodgeSpot(config, anchor)
+			if os.clock() >= state.farDodgeUntil then return nil end
+			local problem
+			if not SafeSpotPosition then
+				problem = "aucun Safe Spot enregistre"
+			elseif (SafeSpotPosition - anchor.Position).Magnitude < (config.farDodgeRadius or 0) then
+				problem = "Safe Spot trop proche du boss"
+			end
+			if problem then
+				if not state.farDodgeWarned then
+					state.farDodgeWarned = true
+					notify("Esquive longue impossible (" .. problem .. ") - on encaisse sur place.", "error")
+				end
+				return nil
+			end
+			return SafeSpotPosition
+		end
+
+		-- attachAboveTop (Shukaku) : hauteur du HAUT du modele au-dessus de son
+		-- ancre + marge, recalculee toutes les 2s (les animations la font varier).
+		function M.topOffset(boss, config, anchor)
+			if not config.attachAboveTop then return Vector3.zero end
+			local now = os.clock()
+			if not state.topOffset or now - state.topOffsetAt > 2 then
+				local ok, cf, size = pcall(function() return boss:GetBoundingBox() end)
+				if ok and cf and size then
+					local top = cf.Position.Y + size.Y / 2
+					state.topOffset = Vector3.new(0, math.max(0, top - anchor.Position.Y) + config.attachAboveTop, 0)
+					state.topOffsetAt = now
+				end
+			end
+			return state.topOffset or Vector3.new(0, config.attachAboveTop, 0)
 		end
 
 		function M.attachTo(boss, config)
@@ -6109,6 +6364,11 @@ do
 			state.dodgeUntil = 0
 			state.riseActiveCount = 0
 			state.gripping = false
+			state.farDodgeUntil = 0
+			state.farDodgeActive = false
+			state.farDodgeWarned = false
+			state.airSince = nil
+			state.topOffset = nil
 
 			-- dodgeAnimationIds (voir BOSS_CONFIGS, ex: Chakra Knight) : bascule
 			-- vers dodgeOffset tant qu'AU MOINS UNE de ces AnimationTrack joue
@@ -6122,7 +6382,7 @@ do
 				state.dodgeAnimConn:Disconnect()
 				state.dodgeAnimConn = nil
 			end
-			if config.dodgeAnimationIds or config.riseAnimationIds then
+			if config.dodgeAnimationIds or config.riseAnimationIds or config.farDodgeAnimationIds then
 				local bossHumanoid = boss:FindFirstChild("Humanoid")
 				if bossHumanoid then
 					-- Un id figure-t-il dans une des listes de la config ?
@@ -6138,6 +6398,13 @@ do
 						local anim = animTrack.Animation
 						local id = anim and tostring(anim.AnimationId)
 						if not id then return end
+
+						-- farDodgeAnimationIds : repli au Safe Spot pendant
+						-- farDodgeSeconds (voir M.farDodgeSpot).
+						if matches(id, config.farDodgeAnimationIds) then
+							state.farDodgeUntil = math.max(state.farDodgeUntil, os.clock() + (config.farDodgeSeconds or 10))
+							return
+						end
 
 						-- riseAnimationIds : montee LEGERE, pour les attaques a
 						-- courte portee qu'il suffit de survoler de quelques studs
@@ -6229,25 +6496,46 @@ do
 				-- replication suit et le serveur nous voit vraiment dans le coin.
 				-- (Verifie aussi : les degats ne viennent PAS des pics de sol -
 				-- aucun WormBranch n'est apparu pendant ces trois attaques.)
+				local farSpot = M.farDodgeSpot(config, anchor)
+				state.farDodgeActive = farSpot ~= nil
 				local dodging = M.isDodging()
 				local targetPosition
-				if dodging and config.dodgeCyclePositions then
+				if farSpot then
+					targetPosition = farSpot
+					state.airSince = nil
+				elseif dodging and config.dodgeCyclePositions then
 					local positions = config.dodgeCyclePositions
 					local index = (math.floor(os.clock() * 10) % #positions) + 1
 					targetPosition = positions[index]
 				else
+					-- maxAirSeconds : apres X s d'esquive continue, 0.3s de retour
+					-- au contact. Le detecteur de chute du client (piege "BanMe
+					-- 2E") voit alors le boss sous nous et remet son compteur
+					-- "en l'air" a zero avant les 5s.
+					if dodging and config.maxAirSeconds then
+						local now = os.clock()
+						state.airSince = state.airSince or now
+						local airFor = now - state.airSince
+						if airFor > config.maxAirSeconds then
+							dodging = false
+							if airFor > config.maxAirSeconds + 0.3 then state.airSince = now end
+						end
+					else
+						state.airSince = nil
+					end
 					-- Priorite : approche de Grip > esquive complete > montee
 					-- legere (riseOffset, voir riseAnimationIds) > vol normal.
 					local offset = state.gripping and GRIP_APPROACH_OFFSET
 						or (dodging and config.dodgeOffset)
 						or (state.riseActiveCount > 0 and config.riseOffset)
 						or config.attachOffset
-					targetPosition = anchor.Position + offset
+					targetPosition = anchor.Position + M.topOffset(boss, config, anchor) + offset
 				end
 				if rootPart.Anchored then
 					rootPart.Anchored = false
 				end
-				rootPart.CFrame = CFrame.new(targetPosition) * ATTACH_ROTATION
+				-- Debout au Safe Spot, couche au-dessus du boss.
+				rootPart.CFrame = farSpot and CFrame.new(targetPosition) or CFrame.new(targetPosition) * ATTACH_ROTATION
 				rootPart.AssemblyLinearVelocity = Vector3.zero
 				rootPart.AssemblyAngularVelocity = Vector3.zero
 				-- Le panneau (Current Boss/Stop Reason/Stage) est mis a jour
@@ -6272,6 +6560,8 @@ do
 			end
 			state.dodging = false
 			state.dodgeActiveCount = 0
+			state.farDodgeUntil = 0
+			state.farDodgeActive = false
 			-- Au cas ou le detach arrive EN PLEIN dodgeCyclePositions (boss qui
 			-- meurt/disparait pendant Spire/Dragon) : le RenderStep qui remettait
 			-- Anchored=false vient d'etre coupe, donc le faire ici pour ne pas
@@ -6349,6 +6639,21 @@ do
 				state.healthConn = nil
 			end
 			if state.hud then state.hud.Root.Visible = false end
+			state.lastQuestAttempt = 0
+			state.questAttempts = 0
+			state.questDone = false
+		end
+
+		-- Passage Auto Boss <-> Auto Gaara : on oublie le boss engage dans
+		-- l'autre mode (sinon findCurrentBoss le reprendrait). Pas dans M.stop :
+		-- couper puis relancer le MEME mode doit garder un loot en attente.
+		function M.switchMode(questBoss)
+			if state.questBoss == questBoss then return end
+			state.questBoss = questBoss
+			state.lastBossName = nil
+			state.lastConfig = nil
+			state.lootPending = false
+			state.bossPresent = false
 		end
 
 		function M.start()
@@ -6390,6 +6695,17 @@ do
 				local CHAKRA_SENSE_RESUME_DELAY_SECONDS = 2
 				local notifiedMissing = false
 				while state.enabled and state.token == myToken and not unloaded do
+					-- Mode quete termine (rendue, ou conditions non remplies) :
+					-- on coupe le toggle, qui appelle M.stop via son callback.
+					if state.questDone then
+						state.questDone = false
+						local control = FEATURE_CONTROLS.AutoGaaraEnabled
+						task.defer(function()
+							if control and control.Get() then control.Set(false) end
+						end)
+						break
+					end
+
 					-- Pause anti-detection : si quelqu'un a Chakra Sense actif a
 					-- proximite (signal partage ChakraSenseThreat, alimente par
 					-- les deux watchers Chakra Sense plus bas dans le fichier),
@@ -6499,7 +6815,7 @@ do
 						-- de re-attacher dessus puisqu'on pense deja etre attache
 						-- (au mauvais boss) - reste visuellement bloque sur
 						-- l'ancien tant qu'aucun tick ne renvoie nil.
-						if state.attached and state.lastBossName and not Settings.AutoBossSelected[state.lastBossName] then
+						if state.attached and state.lastBossName and not M.isSelected(state.lastBossName) then
 							M.detach()
 							state.bossPresent = false
 							state.lastConfig = nil
@@ -6551,6 +6867,7 @@ do
 
 							if boss then
 								notifiedMissing = false
+								state.questAttempts = 0
 								state.bossPresent = true
 								if not state.attached then
 									M.attachTo(boss, config)
@@ -6645,7 +6962,12 @@ do
 									-- gener l'esquive elle-meme. Passe par isDodging (et
 									-- pas state.dodging) pour couvrir aussi la marge
 									-- gardee apres la fin de l'animation.
-									if bossAlive and not bossDowned and not M.isDodging() and M.comboReady() then
+									-- Settings.Invincible du boss (phases 2/3 de Gaara,
+									-- apparition de Shukaku) : taper ne sert a rien.
+									local bossSettings = boss:FindFirstChild("Settings")
+									local invincibleValue = bossSettings and bossSettings:FindFirstChild("Invincible")
+									local bossInvincible = invincibleValue and invincibleValue.Value == true
+									if bossAlive and not bossDowned and not bossInvincible and not M.isDodging() and M.comboReady() then
 										local ok, canAttack = pcall(canM1)
 										if ok and canAttack then
 											pcall(performM1)
@@ -6731,9 +7053,16 @@ do
 								-- elle-meme est rate-limitee) - dans ce cas on laisse
 								-- la boucle reessayer au lieu de repartir au Safe Spot.
 								if not state.lootPending then
-									local spawning = M.trySpawnBoss()
+									-- Mode quete : lancer/rendre la quete au lieu des
+									-- spawnFloor de la rotation.
+									local spawning
+									if state.questBoss then
+										spawning = M.questStep()
+									else
+										spawning = M.trySpawnBoss()
+									end
 									if spawning then
-										M.setHudState(state.lastBossName or "None", "None", "Spawning")
+										M.setHudState(state.lastBossName or state.questBoss or "None", state.questBoss and "Quete" or "None", "Spawning")
 									else
 										M.setHudState("None", "Not Found Any Boss", "Waiting")
 										if not notifiedMissing then
@@ -6756,9 +7085,20 @@ do
 		-- Pleine largeur : c'est la card la plus chargee du menu (7 reglages + le
 		-- multi-select des boss), elle etoufferait dans une demi-colonne.
 		local AutoBossSection = addSection(AutoPage, "Auto Boss", true)
+		-- Auto Boss et Auto Gaara partagent le meme moteur (M) : un seul tourne
+		-- a la fois. Allumer l'un eteint l'autre ; eteindre l'un ne coupe le
+		-- moteur que s'il tournait dans son mode (le chargement d'une config
+		-- appelle Set(false) sur les deux, dans un ordre quelconque).
 		FEATURE_CONTROLS.AutoBossEnabled = addToggleRow(AutoBossSection, "Auto Boss", Settings.AutoBossEnabled, function(value)
 			Settings.AutoBossEnabled = value
-			if value then M.start() else M.stop() end
+			if value then
+				local gaaraControl = FEATURE_CONTROLS.AutoGaaraEnabled
+				if gaaraControl and gaaraControl.Get() then gaaraControl.Set(false) end
+				M.switchMode(nil)
+				M.start()
+			elseif not state.questBoss then
+				M.stop()
+			end
 		end)
 		attachTooltip(FEATURE_CONTROLS.AutoBossEnabled.Row, "Vole au-dessus du boss, attaque, grip sous 50 PV, ramasse le loot et retourne au Safe Spot automatiquement.")
 		FEATURE_CONTROLS.AutoBossPauseOnChakraSense = addToggleRow(AutoBossSection, "Pause si Chakra Sense detecte", Settings.AutoBossPauseOnChakraSense, function(value)
@@ -6794,6 +7134,28 @@ do
 		addMultiSelectDropdownRow(AutoBossSection, "Boss", BOSS_NAMES, Settings.AutoBossSelected, function(name, state)
 			Settings.AutoBossSelected[name] = state
 		end)
+
+		-- Auto Gaara : combat de la quete "Gourd Mastery" avec le moteur d'Auto
+		-- Boss (memes reglages : Panic Heal, pause Chakra Sense, Skip if Player
+		-- Nearby, Auto Equip Weapon...). Lance la quete, se bat (Shukaku compris
+		-- en phase 4), rend la quete puis s'eteint. La version world boss
+		-- eventuelle se coche dans la liste "Boss" ci-dessus.
+		do
+			local AutoGaaraSection = addSection(AutoPage, "Auto Gaara (quete)")
+			FEATURE_CONTROLS.AutoGaaraEnabled = addToggleRow(AutoGaaraSection, "Auto Gaara", Settings.AutoGaaraEnabled, function(value)
+				Settings.AutoGaaraEnabled = value
+				if value then
+					local bossControl = FEATURE_CONTROLS.AutoBossEnabled
+					if bossControl and bossControl.Get() then bossControl.Set(false) end
+					M.switchMode("Gaara")
+					M.start()
+				elseif state.questBoss then
+					M.stop()
+					M.switchMode(nil)
+				end
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoGaaraEnabled.Row, "Lance la quete Gourd Mastery chez Gaara, le combat (Shukaku compris), rend la quete et s'arrete. Utilise les reglages d'Auto Boss. Le Scream (rayon 125) s'esquive au Safe Spot : en definir un a plus de 130 studs de Gaara, au sol.")
+		end
 	end
 
 	do
