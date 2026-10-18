@@ -485,7 +485,9 @@ local DEFAULT_FEATURES = {
 	AutoGaaraEnabled = false,
 	AutoPowderEnabled = false,
 	AutoPowderHeight = 6,
-	AutoPowderHop = true,
+	-- Desactive par defaut : apres un hop direct, le serveur peut ne jamais
+	-- repondre a InvokeServer("LoadedIn") (menu bloque, constate 2 fois sur 4).
+	AutoPowderHop = false,
 	AutoBossPauseOnChakraSense = true,
 	-- Chakra Sense + : pause sur le sort SELECTIONNE en main, sans attendre
 	-- qu'il soit lance (voir ChakraSenseThreat.itemHolder).
@@ -8019,7 +8021,14 @@ do
 						end
 						task.wait(0.1)
 					end
-					if P.token == myToken then
+					if unloaded then
+						-- Decharge (rechargement de Vapel) : on coupe juste le moteur
+						-- et le HUD, SANS passer par le toggle - son callback
+						-- effacerait Prefs.AutoPowderResume et la nouvelle instance
+						-- ne relancerait pas le farm (constate en jeu).
+						state.powder = false
+						pcall(M.stop)
+					elseif P.token == myToken then
 						local control = FEATURE_CONTROLS.AutoPowderEnabled
 						task.defer(function()
 							if control and control.Get() then control.Set(false) end
@@ -10650,9 +10659,9 @@ local ready, stableSince = false, nil
 --      ("LoadedIn"). Vrai clic sur le bouton, 8 s APRES qu'il est branche :
 --      clique 2 s apres (declenchement direct des connexions), LoadedIn n'a
 --      jamais eu de reponse et on restait bloque sur le menu.
---   Filet : toujours sur le menu 60 s apres le premier clic -> hop vers un
---   autre serveur (en se remettant en file d'attente via __VON_SELF).
-local auto = { tapSince = nil, tapClicked = false, wiredSince = nil, clicks = 0, lastClick = 0, firstClick = nil, recovering = false }
+--   Pas de hop de secours si le menu reste bloque : re-hopper relancait la
+--   meme attente sur un autre serveur.
+local auto = { tapSince = nil, tapClicked = false, wiredSince = nil, clicks = 0, lastClick = 0, firstClick = nil }
 local VIM = game:GetService("VirtualInputManager")
 local GuiService = game:GetService("GuiService")
 local function click(x, y)
@@ -10662,29 +10671,6 @@ local function click(x, y)
 		task.wait(0.06)
 		VIM:SendMouseButtonEvent(x, y, 0, false, game, 1)
 	end)
-end
-local function recoveryHop()
-	if auto.recovering then return end
-	auto.recovering = true
-	if __VON_SELF and type(queue_on_teleport) == "function" then
-		pcall(queue_on_teleport, "local __VON_SELF = " .. string.format("%q", __VON_SELF) .. "\n" .. __VON_SELF)
-	end
-	pcall(function()
-		local HttpService = game:GetService("HttpService")
-		local response = request({ Url = "https://games.roblox.com/v1/games/" .. game.PlaceId
-			.. "/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100", Method = "GET" })
-		local data = HttpService:JSONDecode(response.Body)
-		local choices = {}
-		for _, server in ipairs(data.data) do
-			if server.id ~= game.JobId and server.playing <= server.maxPlayers - 2 then
-				table.insert(choices, server.id)
-			end
-		end
-		if #choices > 0 then
-			game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, choices[math.random(1, #choices)], plr)
-		end
-	end)
-	task.delay(30, function() auto.recovering = false end)
 end
 local loadingModule = nil
 
@@ -10732,9 +10718,6 @@ while os.clock() < deadline do
 				local center = continueBtn.AbsolutePosition + continueBtn.AbsoluteSize / 2
 				click(center.X + inset.X, center.Y + inset.Y)
 			end
-			if auto.firstClick and now - auto.firstClick > 60 then
-				recoveryHop()
-			end
 		else
 			auto.wiredSince = nil
 		end
@@ -10774,13 +10757,10 @@ if ready and ok and latest and latest.AutoRunAfterTeleport then
 end
 ]==]
 
-	-- __VON_SELF : le code en file connait sa propre source, pour pouvoir se
-	-- remettre en file lui-meme s'il doit refaire un hop de secours (voir
-	-- recoveryHop) sans que Vapel soit charge.
 	local function armTeleportQueue()
 		if not Prefs.AutoRunAfterTeleport then return end
 		if type(queue_on_teleport) ~= "function" then return end
-		pcall(queue_on_teleport, "local __VON_SELF = " .. string.format("%q", QUEUED) .. "\n" .. QUEUED)
+		pcall(queue_on_teleport, QUEUED)
 	end
 
 	local TeleportSection = addSection(SettingsPage, "Server Hop")
