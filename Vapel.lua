@@ -10649,19 +10649,20 @@ if not (okPrefs and type(prefs) == "table") then prefs = {} end
 local deadline = os.clock() + 900
 local ready, stableSince = false, nil
 
--- Passage automatique des deux ecrans d'arrivee, comme un joueur :
---   1. LoadingGui "Press anywhere to continue" : ReplicatedStorage.LoadingModule
---      ecoute InputBegan (clic gauche) puis appelle tap(). Vrai clic souris
---      simule (VirtualInputManager) au milieu de l'ecran ; si l'ecran est
---      encore la 4 s apres, on fait ce que fait le jeu : couper sa connexion
---      et appeler tap() (teste en jeu, ca debloque le menu).
+-- Passage automatique des deux ecrans d'arrivee, comme un joueur, UNIQUEMENT
+-- par de vrais clics souris simules (VirtualInputManager) :
+--   1. LoadingGui "Press anywhere to continue" (ReplicatedStorage.LoadingModule
+--      ecoute InputBegan) : clic au milieu de l'ecran 3 s apres qu'il est
+--      pret, reessaye toutes les 4 s.
 --   2. MenuScreen, bouton Continue -> LoadIntoGame(true) -> InvokeServer
---      ("LoadedIn"). Vrai clic sur le bouton, 8 s APRES qu'il est branche :
---      clique 2 s apres (declenchement direct des connexions), LoadedIn n'a
---      jamais eu de reponse et on restait bloque sur le menu.
---   Pas de hop de secours si le menu reste bloque : re-hopper relancait la
---   meme attente sur un autre serveur.
-local auto = { tapSince = nil, tapClicked = false, wiredSince = nil, clicks = 0, lastClick = 0, firstClick = nil }
+--      ("LoadedIn") : clic sur le bouton 4 s apres qu'il est branche,
+--      reessaye toutes les 6 s TANT QUE le verrou du jeu (u42, 1er upvalue de
+--      LoadIntoGame) n'est pas pris.
+-- JAMAIS d'appel direct (LoadingModule:tap(), connection:Fire()) : execute
+-- depuis le thread de l'executeur, il faisait tourner le code du menu hors
+-- contexte et le serveur ne repondait plus jamais a LoadedIn (menu bloque,
+-- 2 fois). Avec des vrais clics : reponse en 0,5 s, en jeu a 17,7 s (teste).
+local auto = { tapSince = nil, tapClicks = 0, tapLast = 0, wiredSince = nil, clicks = 0, lastClick = 0 }
 local VIM = game:GetService("VirtualInputManager")
 local GuiService = game:GetService("GuiService")
 local function click(x, y)
@@ -10685,17 +10686,14 @@ while os.clock() < deadline do
 			local okRequire, module = pcall(require, RS:FindFirstChild("LoadingModule"))
 			if okRequire and type(module) == "table" then loadingModule = module end
 		end
-		local tapConnection = loadingModule and type(loadingModule.Connections) == "table" and loadingModule.Connections["1"]
-		if tapConnection then
-			auto.tapSince = auto.tapSince or os.clock()
-			local waited = os.clock() - auto.tapSince
-			if waited >= 1.5 and not auto.tapClicked and camera then
-				auto.tapClicked = true
+		local tapReady = loadingModule and type(loadingModule.Connections) == "table" and loadingModule.Connections["1"] ~= nil
+		if tapReady and camera then
+			local now = os.clock()
+			auto.tapSince = auto.tapSince or now
+			if now - auto.tapSince >= 3 and now - auto.tapLast >= 4 and auto.tapClicks < 6 then
+				auto.tapClicks = auto.tapClicks + 1
+				auto.tapLast = now
 				click(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
-			elseif waited >= 5.5 then
-				pcall(function() tapConnection:Disconnect() end)
-				loadingModule.Connections["1"] = nil
-				pcall(function() loadingModule:tap() end)
 			end
 		else
 			auto.tapSince = nil
@@ -10708,12 +10706,17 @@ while os.clock() < deadline do
 		local continueBtn = menuFrame and menuFrame:FindFirstChild("Continue")
 		local okConns, conns = pcall(getconnections, continueBtn and continueBtn.MouseButton1Down)
 		if ms and ms.Visible and continueBtn and continueBtn.Visible and okConns and #conns > 0 then
-			auto.wiredSince = auto.wiredSince or os.clock()
+			-- Verrou du jeu : une fois LoadIntoGame lance, inutile de recliquer.
+			local locked = false
+			pcall(function()
+				local loadIntoGame = rawget(getfenv(conns[1].Function), "LoadIntoGame")
+				locked = debug.getupvalue(loadIntoGame, 1) ~= false
+			end)
 			local now = os.clock()
-			if now - auto.wiredSince >= 8 and now - auto.lastClick >= 10 and auto.clicks < 3 then
+			auto.wiredSince = auto.wiredSince or now
+			if not locked and now - auto.wiredSince >= 4 and now - auto.lastClick >= 6 and auto.clicks < 4 then
 				auto.clicks = auto.clicks + 1
 				auto.lastClick = now
-				auto.firstClick = auto.firstClick or now
 				local inset = cg.IgnoreGuiInset and Vector2.zero or GuiService:GetGuiInset()
 				local center = continueBtn.AbsolutePosition + continueBtn.AbsoluteSize / 2
 				click(center.X + inset.X, center.Y + inset.Y)
