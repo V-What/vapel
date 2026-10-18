@@ -10633,29 +10633,104 @@ if not (okPrefs and type(prefs) == "table") then prefs = {} end
 -- l'arrivee, ClientGui peut exister avant que le menu ne soit affiche.
 local deadline = os.clock() + 900
 local ready, stableSince = false, nil
-local menuSince, lastContinue = nil, 0
+
+-- Passage automatique des deux ecrans d'arrivee, comme un joueur :
+--   1. LoadingGui "Press anywhere to continue" : ReplicatedStorage.LoadingModule
+--      ecoute InputBegan (clic gauche) puis appelle tap(). Vrai clic souris
+--      simule (VirtualInputManager) au milieu de l'ecran ; si l'ecran est
+--      encore la 4 s apres, on fait ce que fait le jeu : couper sa connexion
+--      et appeler tap() (teste en jeu, ca debloque le menu).
+--   2. MenuScreen, bouton Continue -> LoadIntoGame(true) -> InvokeServer
+--      ("LoadedIn"). Vrai clic sur le bouton, 8 s APRES qu'il est branche :
+--      clique 2 s apres (declenchement direct des connexions), LoadedIn n'a
+--      jamais eu de reponse et on restait bloque sur le menu.
+--   Filet : toujours sur le menu 60 s apres le premier clic -> hop vers un
+--   autre serveur (en se remettant en file d'attente via __VON_SELF).
+local auto = { tapSince = nil, tapClicked = false, wiredSince = nil, clicks = 0, lastClick = 0, firstClick = nil, recovering = false }
+local VIM = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+local function click(x, y)
+	pcall(function()
+		VIM:SendMouseMoveEvent(x, y, game)
+		VIM:SendMouseButtonEvent(x, y, 0, true, game, 1)
+		task.wait(0.06)
+		VIM:SendMouseButtonEvent(x, y, 0, false, game, 1)
+	end)
+end
+local function recoveryHop()
+	if auto.recovering then return end
+	auto.recovering = true
+	if __VON_SELF and type(queue_on_teleport) == "function" then
+		pcall(queue_on_teleport, "local __VON_SELF = " .. string.format("%q", __VON_SELF) .. "\n" .. __VON_SELF)
+	end
+	pcall(function()
+		local HttpService = game:GetService("HttpService")
+		local response = request({ Url = "https://games.roblox.com/v1/games/" .. game.PlaceId
+			.. "/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100", Method = "GET" })
+		local data = HttpService:JSONDecode(response.Body)
+		local choices = {}
+		for _, server in ipairs(data.data) do
+			if server.id ~= game.JobId and server.playing <= server.maxPlayers - 2 then
+				table.insert(choices, server.id)
+			end
+		end
+		if #choices > 0 then
+			game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, choices[math.random(1, #choices)], plr)
+		end
+	end)
+	task.delay(30, function() auto.recovering = false end)
+end
+local loadingModule = nil
+
 while os.clock() < deadline do
-	-- Auto Golden Powder en cours (hop automatique) : on clique Continue
-	-- nous-memes, 2 s apres que le menu est pret (boutons branches), en
-	-- declenchant les connexions du bouton comme le ferait le clic. Continue
-	-- appelle LoadIntoGame(true) -> InvokeServer("LoadedIn").
-	if prefs.AutoPowderResume then
+	if prefs.AutoRunAfterTeleport then
 		local pg = plr:FindFirstChild("PlayerGui")
+		local camera = workspace.CurrentCamera
+
+		-- 1. Press anywhere
+		local loadingGui = pg and pg:FindFirstChild("LoadingGui")
+		if loadingGui and loadingGui.Enabled and not loadingModule then
+			local okRequire, module = pcall(require, RS:FindFirstChild("LoadingModule"))
+			if okRequire and type(module) == "table" then loadingModule = module end
+		end
+		local tapConnection = loadingModule and type(loadingModule.Connections) == "table" and loadingModule.Connections["1"]
+		if tapConnection then
+			auto.tapSince = auto.tapSince or os.clock()
+			local waited = os.clock() - auto.tapSince
+			if waited >= 1.5 and not auto.tapClicked and camera then
+				auto.tapClicked = true
+				click(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+			elseif waited >= 5.5 then
+				pcall(function() tapConnection:Disconnect() end)
+				loadingModule.Connections["1"] = nil
+				pcall(function() loadingModule:tap() end)
+			end
+		else
+			auto.tapSince = nil
+		end
+
+		-- 2. Continue
 		local cg = pg and pg:FindFirstChild("ClientGui")
 		local ms = cg and cg:FindFirstChild("MenuScreen")
 		local menuFrame = ms and ms:FindFirstChild("Menu")
 		local continueBtn = menuFrame and menuFrame:FindFirstChild("Continue")
 		local okConns, conns = pcall(getconnections, continueBtn and continueBtn.MouseButton1Down)
 		if ms and ms.Visible and continueBtn and continueBtn.Visible and okConns and #conns > 0 then
-			menuSince = menuSince or os.clock()
-			if os.clock() - menuSince >= 2 and os.clock() - lastContinue >= 5 then
-				lastContinue = os.clock()
-				for _, connection in ipairs(conns) do
-					pcall(function() connection:Fire() end)
-				end
+			auto.wiredSince = auto.wiredSince or os.clock()
+			local now = os.clock()
+			if now - auto.wiredSince >= 8 and now - auto.lastClick >= 10 and auto.clicks < 3 then
+				auto.clicks = auto.clicks + 1
+				auto.lastClick = now
+				auto.firstClick = auto.firstClick or now
+				local inset = cg.IgnoreGuiInset and Vector2.zero or GuiService:GetGuiInset()
+				local center = continueBtn.AbsolutePosition + continueBtn.AbsoluteSize / 2
+				click(center.X + inset.X, center.Y + inset.Y)
+			end
+			if auto.firstClick and now - auto.firstClick > 60 then
+				recoveryHop()
 			end
 		else
-			menuSince = nil
+			auto.wiredSince = nil
 		end
 	end
 	local settings = RS:FindFirstChild("Settings")
@@ -10686,15 +10761,20 @@ local ok, latest = pcall(function()
 end)
 if ready and ok and latest and latest.AutoRunAfterTeleport then
 	pcall(function()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/V-What/vapel/master/Vapel.lua"))()
+		-- ?t= : contourne le cache du CDN GitHub (sinon une version vieille de
+		-- quelques minutes est relancee juste apres un push).
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/V-What/vapel/master/Vapel.lua?t=" .. tostring(os.time())))()
 	end)
 end
 ]==]
 
+	-- __VON_SELF : le code en file connait sa propre source, pour pouvoir se
+	-- remettre en file lui-meme s'il doit refaire un hop de secours (voir
+	-- recoveryHop) sans que Vapel soit charge.
 	local function armTeleportQueue()
 		if not Prefs.AutoRunAfterTeleport then return end
 		if type(queue_on_teleport) ~= "function" then return end
-		pcall(queue_on_teleport, QUEUED)
+		pcall(queue_on_teleport, "local __VON_SELF = " .. string.format("%q", QUEUED) .. "\n" .. QUEUED)
 	end
 
 	local TeleportSection = addSection(SettingsPage, "Server Hop")
