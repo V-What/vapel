@@ -40,22 +40,22 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- passer par Skin.paint, sinon la couleur est figee a la creation et ne suivra
 -- plus les changements de theme.
 local Theme = {
-	Background = Color3.fromRGB(15, 17, 19),
-	Panel = Color3.fromRGB(23, 26, 29),
-	PanelLight = Color3.fromRGB(29, 33, 38), -- haut des gradients de card, legerement plus clair que Panel
-	Element = Color3.fromRGB(29, 33, 38),
-	ElementHover = Color3.fromRGB(33, 37, 41),
-	Stroke = Color3.fromRGB(38, 42, 47),
-	StrokeStrong = Color3.fromRGB(51, 57, 64), -- filet appuye : bordure au survol, contour ouvert
-	Accent = Color3.fromRGB(230, 233, 236),
-	AccentDim = Color3.fromRGB(185, 190, 196), -- accent assombri, utilise dans les gradients
-	OnAccent = Color3.fromRGB(15, 17, 19), -- texte/icone POSE sur un fond Accent
-	Danger = Color3.fromRGB(217, 88, 75),
-	Warn = Color3.fromRGB(217, 164, 65),
-	Success = Color3.fromRGB(76, 175, 109),
-	Text = Color3.fromRGB(230, 233, 236),
-	SubText = Color3.fromRGB(121, 128, 138),
-	SubTextDim = Color3.fromRGB(91, 98, 107), -- texte tertiaire : placeholders, unites
+	Background = Color3.fromRGB(18, 20, 28),
+	Panel = Color3.fromRGB(28, 30, 40),
+	PanelLight = Color3.fromRGB(36, 38, 48),
+	Element = Color3.fromRGB(36, 38, 48),
+	ElementHover = Color3.fromRGB(44, 46, 58),
+	Stroke = Color3.fromRGB(52, 54, 66),
+	StrokeStrong = Color3.fromRGB(70, 72, 86), -- filet appuye : bordure au survol, contour ouvert
+	Accent = Color3.fromRGB(242, 180, 92),
+	AccentDim = Color3.fromRGB(200, 140, 60), -- accent assombri
+	OnAccent = Color3.fromRGB(28, 20, 8), -- texte/icone POSE sur un fond Accent
+	Danger = Color3.fromRGB(255, 143, 122),
+	Warn = Color3.fromRGB(255, 200, 87),
+	Success = Color3.fromRGB(123, 224, 160),
+	Text = Color3.fromRGB(243, 241, 238),
+	SubText = Color3.fromRGB(160, 158, 154),
+	SubTextDim = Color3.fromRGB(110, 110, 116), -- texte tertiaire : placeholders, unites
 }
 
 --------------------------------------------------------------------------------
@@ -96,24 +96,28 @@ do
 		Prompt.DisplayOrder = 1000
 		Prompt.Parent = PlayerGui
 
+		-- Meme style "Verre" que le menu (carte transparente, pilules), mais
+		-- construit a la main : Skin et create() n'existent pas encore ici.
+		local sans = "rbxasset://fonts/families/BuilderSans.json"
 		local Card = Instance.new("Frame")
 		Card.AnchorPoint = Vector2.new(1, 1)
 		Card.Position = UDim2.new(1, -16, 1, -16)
-		Card.Size = UDim2.new(0, 300, 0, 146)
-		Card.BackgroundColor3 = Theme.Panel
+		Card.Size = UDim2.new(0, 320, 0, 196)
+		Card.BackgroundColor3 = Theme.Background
+		Card.BackgroundTransparency = 0.12
 		Card.BorderSizePixel = 0
 		Card.Parent = Prompt
-		Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 18)
 		local stroke = Instance.new("UIStroke", Card)
-		stroke.Color = Theme.StrokeStrong
-		stroke.Transparency = 0
+		stroke.Color = Theme.Text
+		stroke.Transparency = 0.86
 
 		local title = Instance.new("TextLabel")
 		title.BackgroundTransparency = 1
-		title.Position = UDim2.new(0, 14, 0, 12)
-		title.Size = UDim2.new(1, -28, 0, 20)
-		title.Font = Enum.Font.GothamBold
-		title.TextSize = 15
+		title.Position = UDim2.new(0, 18, 0, 16)
+		title.Size = UDim2.new(1, -36, 0, 22)
+		title.FontFace = Font.new(sans, Enum.FontWeight.ExtraBold)
+		title.TextSize = 17
 		title.TextXAlignment = Enum.TextXAlignment.Left
 		title.TextColor3 = Theme.Text
 		title.Text = "Von Client deja lance"
@@ -121,9 +125,9 @@ do
 
 		local body = Instance.new("TextLabel")
 		body.BackgroundTransparency = 1
-		body.Position = UDim2.new(0, 14, 0, 34)
-		body.Size = UDim2.new(1, -28, 0, 32)
-		body.Font = Enum.Font.GothamMedium
+		body.Position = UDim2.new(0, 18, 0, 40)
+		body.Size = UDim2.new(1, -36, 0, 34)
+		body.FontFace = Font.new(sans, Enum.FontWeight.Medium)
 		body.TextSize = 13
 		body.TextXAlignment = Enum.TextXAlignment.Left
 		body.TextYAlignment = Enum.TextYAlignment.Top
@@ -132,30 +136,30 @@ do
 		body.Text = "Une instance tourne deja. Deux instances se battent pour ta position et tes touches."
 		body.Parent = Card
 
-		-- Trois boutons empiles : les libelles sont longs, une rangee de trois
-		-- les tronquerait sur 300 px de large.
+		-- Trois pilules empilees : les libelles sont longs, une rangee de trois
+		-- les tronquerait sur 320 px de large.
 		for index, option in ipairs({
 			{ key = "unload", text = "Decharger l'ancienne et relancer", accent = true },
 			{ key = "both", text = "Lancer quand meme (2 instances)", accent = false },
 			{ key = "cancel", text = "Annuler", accent = false },
 		}) do
 			local button = Instance.new("TextButton")
-			button.Position = UDim2.new(0, 14, 0, 60 + (index - 1) * 26)
-			button.Size = UDim2.new(1, -28, 0, 22)
-			button.BackgroundColor3 = option.accent and Theme.Accent or Theme.Element
+			button.Position = UDim2.new(0, 18, 0, 80 + (index - 1) * 36)
+			button.Size = UDim2.new(1, -36, 0, 30)
+			button.BackgroundColor3 = option.accent and Theme.Accent or Theme.Text
+			button.BackgroundTransparency = option.accent and 0 or 0.9
 			button.BorderSizePixel = 0
 			button.AutoButtonColor = true
-			button.Font = Enum.Font.GothamBold
-			button.TextSize = 12
+			button.FontFace = Font.new(sans, Enum.FontWeight.Bold)
+			button.TextSize = 13
 			button.TextColor3 = option.accent and Theme.OnAccent or Theme.Text
 			button.Text = option.text
 			button.Parent = Card
-			Instance.new("UICorner", button).CornerRadius = UDim.new(0, 4)
+			Instance.new("UICorner", button).CornerRadius = UDim.new(1, 0)
 			button.MouseButton1Click:Connect(function()
 				VonEnv.__VonChoice = option.key
 			end)
 		end
-
 		-- 30 s sans reponse : on annule. Mieux vaut ne rien faire que de laisser
 		-- une invite orpheline si le joueur ne l'a pas vue.
 		local deadline = os.clock() + 30
@@ -251,7 +255,7 @@ local DEFAULT_PREFS = {
 	MenuKeybind = "RightControl",
 	InventoryWebhookUrl = "https://discord.com/api/webhooks/1534652533186887800/X3KqFqpuIBdQa7DqWJI7U0Gg1PA2FiB76cj78HOKBEkxftwCiPW3fwNYipO3p77rhT-u",
 	ShowKeybindHud = false,
-	MenuTheme = "Graphite",
+	MenuTheme = "Ambre",
 	AutoRunAfterTeleport = false, -- relancer le script apres un changement de serveur
 }
 
@@ -298,7 +302,7 @@ local Skin = {
 	current = nil,
 	registry = {}, -- { { inst = <Instance>, map = { Propriete = "NomDeJeton" } }, ... }
 	byInst = {},   -- inst -> son entree dans registry, pour pouvoir la retrouver
-	order = { "Graphite", "Ambre", "Jade", "Indigo", "Rouille", "Papier" },
+	order = { "Ambre", "Graphite", "Jade", "Indigo", "Rouille", "Papier" },
 }
 
 Skin.themes = {
@@ -313,16 +317,16 @@ Skin.themes = {
 		OnAccent = Color3.fromRGB(15, 17, 19), Success = Color3.fromRGB(76, 175, 109),
 		Warn = Color3.fromRGB(217, 164, 65), Danger = Color3.fromRGB(217, 88, 75),
 	},
-	-- Ambre sur graphite froid : couleur d'instrument, lisible sur toute scene.
+	-- Ambre sur nuit bleutee : le theme de la maquette "Verre", par defaut.
 	Ambre = {
-		Background = Color3.fromRGB(20, 22, 26), Panel = Color3.fromRGB(26, 29, 34),
-		PanelLight = Color3.fromRGB(32, 36, 41), Element = Color3.fromRGB(32, 36, 41),
-		ElementHover = Color3.fromRGB(35, 39, 47), Stroke = Color3.fromRGB(43, 48, 56),
-		StrokeStrong = Color3.fromRGB(56, 63, 73), Text = Color3.fromRGB(221, 226, 234),
-		SubText = Color3.fromRGB(124, 133, 147), SubTextDim = Color3.fromRGB(93, 101, 114),
-		Accent = Color3.fromRGB(232, 163, 61), AccentDim = Color3.fromRGB(184, 128, 45),
-		OnAccent = Color3.fromRGB(20, 22, 26), Success = Color3.fromRGB(94, 210, 142),
-		Warn = Color3.fromRGB(232, 163, 61), Danger = Color3.fromRGB(224, 104, 92),
+		Background = Color3.fromRGB(18, 20, 28), Panel = Color3.fromRGB(28, 30, 40),
+		PanelLight = Color3.fromRGB(36, 38, 48), Element = Color3.fromRGB(36, 38, 48),
+		ElementHover = Color3.fromRGB(44, 46, 58), Stroke = Color3.fromRGB(52, 54, 66),
+		StrokeStrong = Color3.fromRGB(70, 72, 86), Text = Color3.fromRGB(243, 241, 238),
+		SubText = Color3.fromRGB(160, 158, 154), SubTextDim = Color3.fromRGB(110, 110, 116),
+		Accent = Color3.fromRGB(242, 180, 92), AccentDim = Color3.fromRGB(200, 140, 60),
+		OnAccent = Color3.fromRGB(28, 20, 8), Success = Color3.fromRGB(123, 224, 160),
+		Warn = Color3.fromRGB(255, 200, 87), Danger = Color3.fromRGB(255, 143, 122),
 	},
 	-- Le plus calme : gris violace, vert sourd.
 	Jade = {
@@ -423,7 +427,7 @@ function Skin.set(name)
 	Skin.registry = kept
 end
 
-Skin.set(Prefs.MenuTheme or "Graphite")
+Skin.set(Prefs.MenuTheme or "Ambre")
 
 -- Enum.KeyCode[nom_invalide] leve une erreur (contrairement a un simple index
 -- de table) : on protege la resolution au cas ou le JSON aurait ete corrompu
@@ -478,6 +482,8 @@ local DEFAULT_FEATURES = {
 	AutoEquipWeaponEnabled = false,
 	AutoBossEnabled = false,
 	AutoGaaraEnabled = false,
+	AutoPowderEnabled = false,
+	AutoPowderHeight = 6,
 	AutoBossPauseOnChakraSense = true,
 	-- Chakra Sense + : pause sur le sort SELECTIONNE en main, sans attendre
 	-- qu'il soit lance (voir ChakraSenseThreat.itemHolder).
@@ -497,6 +503,7 @@ local DEFAULT_FEATURES = {
 	-- ESP Boss (page Visuels > ESP Boss)
 	EspBossEnabled = false,
 	EspBossDistance = true,
+	EspFarPanel = true,
 	AntiFallDamage = false,
 	NoKillBricks = false,
 	-- Attach to Back : studs SOUS la cible. Seule la distance est persistee, la
@@ -1692,44 +1699,227 @@ end))
 -- reellement (reglages ESP + etat de connexion au serveur Python).
 --------------------------------------------------------------------------------
 
+-- Polices du design "Verre" : Builder Sans pour tout le texte, Roboto Mono pour
+-- les valeurs (chiffres, touches). Les deux sont livrees avec le client Roblox
+-- (rbxasset://), rien a telecharger. create() traduit au vol les anciens
+-- Enum.Font du fichier (Gotham*, Code) vers ces FontFace : pas besoin de
+-- toucher chacun des appels.
+do
+	local sans = "rbxasset://fonts/families/BuilderSans.json"
+	local mono = "rbxasset://fonts/families/RobotoMono.json"
+	Skin.fonts = {
+		[Enum.Font.Gotham] = Font.new(sans, Enum.FontWeight.Medium),
+		[Enum.Font.GothamMedium] = Font.new(sans, Enum.FontWeight.SemiBold),
+		[Enum.Font.GothamBold] = Font.new(sans, Enum.FontWeight.Bold),
+		[Enum.Font.GothamBlack] = Font.new(sans, Enum.FontWeight.ExtraBold),
+		[Enum.Font.Code] = Font.new(mono, Enum.FontWeight.Medium),
+	}
+end
+
 local function create(class, props, parent)
 	local inst = Instance.new(class)
 	for key, value in pairs(props or {}) do
-		inst[key] = value
+		if key == "Font" and Skin.fonts[value] then
+			inst.FontFace = Skin.fonts[value]
+		else
+			inst[key] = value
+		end
 	end
 	if parent then inst.Parent = parent end
 	return inst
-end
-
-local function corner(parent, radius)
-	return create("UICorner", { CornerRadius = UDim.new(0, radius or 6) }, parent)
 end
 
 local function tween(inst, props, time)
 	TweenService:Create(inst, TweenInfo.new(time or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
 end
 
--- Variante avec style/direction d'easing choisis (ex: Back/Out pour un petit
--- rebond sur les elements interactifs, plus "vivant" qu'un Quad classique).
-local function tweenStyled(inst, props, time, style, direction)
-	TweenService:Create(inst, TweenInfo.new(time or 0.15, style or Enum.EasingStyle.Back, direction or Enum.EasingDirection.Out), props):Play()
+--------------------------------------------------------------------------------
+-- Design "Verre" : briques visuelles partagees par tout le menu.
+--
+-- Roblox ne sait pas flouter ce qu'il y a derriere un Frame : le "verre" est
+-- donc une simple transparence du fond de fenetre. Les surfaces posees DANS la
+-- fenetre (cartes, pistes, pilules) prennent la couleur du TEXTE a tres faible
+-- opacite : elles eclaircissent sur les themes sombres et assombrissent sur
+-- Papier, sans jeton de couleur de plus par theme.
+--
+-- Tout vit dans la table Skin (champs et fonctions), aucun local de plus a la
+-- racine : voir la note des 200 registres en tete de fichier.
+--------------------------------------------------------------------------------
+
+Skin.R = { Window = 18, Card = 14, Element = 10 } -- rayons des coins
+-- Transparences : Glass = fond de fenetre/panneaux, Card = cartes, Track =
+-- pistes et pilules au repos, Hover = survol, Tint = fond teinte accent,
+-- Line = contours fins.
+Skin.A = { Glass = 0.16, Card = 0.95, Track = 0.88, Hover = 0.82, Tint = 0.84, Line = 0.9 }
+Skin.iconParts = setmetatable({}, { __mode = "k" })
+
+-- Comme Skin.paint, mais sans appliquer la couleur tout de suite : sert quand
+-- on veut ANIMER vers la nouvelle couleur (Skin.shift) tout en gardant le
+-- registre a jour pour les changements de theme.
+function Skin.remap(inst, map)
+	local entry = Skin.byInst[inst]
+	if entry then
+		for prop, token in pairs(map) do
+			entry.map[prop] = token
+		end
+	else
+		entry = { inst = inst, map = map }
+		Skin.byInst[inst] = entry
+		table.insert(Skin.registry, entry)
+	end
+	return inst
 end
 
-local function gradient(parent, colorSequence, rotation)
-	return create("UIGradient", { Color = colorSequence, Rotation = rotation or 90 }, parent)
+-- Animation standard du menu : Quint/Out, courte. direction optionnelle.
+function Skin.ease(inst, props, time, style, direction)
+	local t = TweenService:Create(inst, TweenInfo.new(
+		time or 0.22,
+		style or Enum.EasingStyle.Quint,
+		direction or Enum.EasingDirection.Out
+	), props)
+	t:Play()
+	return t
+end
+
+-- Change de jeton(s) de couleur en douceur. extra : autres proprietes a animer
+-- en meme temps (BackgroundTransparency, Position...).
+function Skin.shift(inst, map, extra, time)
+	Skin.remap(inst, map)
+	local goal = extra or {}
+	for prop, token in pairs(map) do
+		goal[prop] = Theme[token]
+	end
+	return Skin.ease(inst, goal, time or 0.18)
+end
+
+-- radius nil => pilule (coins entierement ronds).
+function Skin.round(inst, radius)
+	return create("UICorner", { CornerRadius = radius and UDim.new(0, radius) or UDim.new(1, 0) }, inst)
+end
+
+-- Contour fin. ApplyStrokeMode Border obligatoire sur les Text* : par defaut
+-- un UIStroke y entoure les LETTRES, pas le cadre.
+function Skin.edge(inst, transparency, token)
+	return Skin.paint(create("UIStroke", {
+		Transparency = transparency or Skin.A.Line,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, inst), { Color = token or "Text" })
+end
+
+-- Voile : surface teintee par le texte (cartes, pistes, pilules).
+function Skin.veil(inst, transparency)
+	inst.BackgroundTransparency = transparency or Skin.A.Card
+	inst.BorderSizePixel = 0
+	return Skin.paint(inst, { BackgroundColor3 = "Text" })
+end
+
+-- Panneau de verre : fond de fenetre transparent + contour fin.
+function Skin.glass(inst, radius, transparency)
+	inst.BackgroundTransparency = transparency or Skin.A.Glass
+	inst.BorderSizePixel = 0
+	Skin.paint(inst, { BackgroundColor3 = "Background" })
+	Skin.round(inst, radius)
+	Skin.edge(inst, 0.88)
+	return inst
+end
+
+-- Champ de saisie sombre (nom de config, webhook...). Remplace l'ancien
+-- coin + contour + marge poses a la main sur chaque TextBox.
+function Skin.field(box)
+	box.Size = UDim2.new(box.Size.X.Scale, box.Size.X.Offset, 0, 38)
+	box.BackgroundTransparency = 0.45
+	box.BorderSizePixel = 0
+	Skin.paint(box, { BackgroundColor3 = "Background", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+	Skin.round(box, 12)
+	local stroke = Skin.edge(box, 0.88)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, box)
+	box.Focused:Connect(function()
+		Skin.shift(stroke, { Color = "Accent" }, { Transparency = 0 }, 0.15)
+	end)
+	box.FocusLost:Connect(function()
+		Skin.shift(stroke, { Color = "Text" }, { Transparency = 0.88 }, 0.15)
+	end)
+	return box
+end
+
+-- Icones dessinees avec des Frames : aucune image a charger ni a heberger.
+-- Une piece = { x, y, largeur, hauteur, rayon (-1 = rond), pleine?, rotation }
+-- dans une boite de 20x20. Les pieces "creuses" sont un UIStroke de 2 px, qui
+-- deborde du cadre : d'ou les tailles un peu plus petites que la boite.
+Skin.ICONS = {
+	Visuels = { { 2, 6, 16, 8, -1 }, { 7, 7, 6, 6, -1, true } },
+	Joueur = { { 7, 1, 6, 6, -1 }, { 3, 12, 14, 6, 4 } },
+	Auto = { { 3, 3, 14, 14, -1 }, { 12, 0, 6, 6, 1, true, 45 } },
+	Skin = { { 2, 2, 16, 16, -1 }, { 5, 6, 3, 3, -1, true }, { 10, 4, 3, 3, -1, true }, { 12, 9, 3, 3, -1, true } },
+	Autres = { { 2, 2, 5, 5, 2 }, { 13, 2, 5, 5, 2 }, { 2, 13, 5, 5, 2 }, { 13, 13, 5, 5, 2 } },
+	Settings = {
+		{ 1, 3, 18, 2, 1, true }, { 1, 9, 18, 2, 1, true }, { 1, 15, 18, 2, 1, true },
+		{ 3, 1, 6, 6, -1, true }, { 11, 7, 6, 6, -1, true }, { 6, 13, 6, 6, -1, true },
+	},
+	Recherche = { { 3, 3, 9, 9, -1 }, { 11, 13, 7, 2, 1, true, 45 } },
+	Fermer = { { 3, 9, 14, 2, 1, true, 45 }, { 3, 9, 14, 2, 1, true, -45 } },
+	Chevron = { { 2, 9, 9, 2, 1, true, 40 }, { 9, 9, 9, 2, 1, true, -40 } },
+	Coche = { { 3, 11, 6, 2, 1, true, 45 }, { 6, 9, 11, 2, 1, true, -50 } },
+}
+
+-- Construit l'icone `name` dans `parent`, centree par defaut. size : cote de
+-- la boite en px (20 par defaut, les pieces sont mises a l'echelle).
+function Skin.icon(name, parent, token, size)
+	local box = size or 20
+	local k = box / 20
+	local holder = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(box, box),
+		BackgroundTransparency = 1,
+	}, parent)
+	local parts = {}
+	for _, p in ipairs(Skin.ICONS[name] or {}) do
+		local piece = create("Frame", {
+			Position = UDim2.fromOffset(p[1] * k, p[2] * k),
+			Size = UDim2.fromOffset(p[3] * k, p[4] * k),
+			BackgroundTransparency = p[6] and 0 or 1,
+			BorderSizePixel = 0,
+			Rotation = p[7] or 0,
+		}, holder)
+		create("UICorner", { CornerRadius = p[5] < 0 and UDim.new(1, 0) or UDim.new(0, p[5] * k) }, piece)
+		if p[6] then
+			table.insert(parts, { piece, "BackgroundColor3" })
+		else
+			table.insert(parts, { create("UIStroke", { Thickness = math.max(1, 2 * k) }, piece), "Color" })
+		end
+	end
+	Skin.iconParts[holder] = parts
+	Skin.tint(holder, token or "SubText")
+	return holder
+end
+
+-- Recolore toute une icone (etat actif, survol). animated : fondu court.
+function Skin.tint(holder, token, animated)
+	for _, part in ipairs(Skin.iconParts[holder] or {}) do
+		if animated then
+			Skin.shift(part[1], { [part[2]] = token }, nil, 0.15)
+		else
+			Skin.paint(part[1], { [part[2]] = token })
+		end
+	end
 end
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Von Client"
 ScreenGui.ResetOnSpawn = false
+-- Sibling : un enfant passe toujours devant son parent, et les ZIndex ne se
+-- comparent qu'entre freres. Plus besoin d'etager les ZIndex a la main sur
+-- tout l'arbre (c'etait le cas avec Global).
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder = 999 -- passe au premier plan, au-dessus des UI du jeu
 ScreenGui.Parent = PlayerGui
 
 --------------------------------------------------------------------------------
 -- Toasts (notifications) - utilises par FeatureState.ChakraSenseNotifier
--- Chaque toast a une puce coloree (info/succes/erreur) et une barre de
--- progression en bas qui se vide en temps reel, pour visualiser le temps
--- restant avant disparition. Un nombre max de toasts visibles evite
+-- Pilules de verre centrees en haut de l'ecran : pastille coloree selon le
+-- type (info/succes/attention/erreur), texte, et une fine barre qui se vide
+-- en temps reel pour visualiser le temps restant avant disparition. Un nombre max de toasts visibles evite
 -- l'accumulation sans fin quand une feature notifie en rafale (ex: Panic
 -- Teleport, qui peut notifier plusieurs fois par seconde).
 --------------------------------------------------------------------------------
@@ -1742,30 +1932,36 @@ ScreenGui.Parent = PlayerGui
 -- fichier). Un toast dure quelques secondes, pas la peine de le repeindre en
 -- cours de route s'il est a l'ecran pile au changement de theme.
 local TOAST = {
-	Width = 300,
+	Width = 520,     -- largeur de la colonne de toasts (chaque toast s'ajuste a son texte)
+	TextMax = 380,   -- au-dela, le texte passe a la ligne
+	Max = 4,         -- toasts visibles simultanement (voir notify)
+	seq = 0,         -- LayoutOrder decroissant : le plus recent en haut
 	Kinds = {
-		info = { Token = "Accent", Glyph = "●" },
+		info = { Token = "Accent", Glyph = "i" },
 		success = { Token = "Success", Glyph = "✓" },
+		warn = { Token = "Warn", Glyph = "!" },
 		error = { Token = "Danger", Glyph = "✕" },
 	},
 }
-local activeToasts = {} -- max 4 toasts visibles simultanement (voir notify)
+local activeToasts = {} -- toasts a l'ecran, du plus ancien au plus recent
 
+-- Colonne centree en haut de l'ecran, sous la barre Roblox.
 local ToastHolder = create("Frame", {
-	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -13, 1, -13),
-	Size = UDim2.new(0, TOAST.Width, 0, 460),
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 52),
+	Size = UDim2.new(0, TOAST.Width, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
 	BackgroundTransparency = 1,
+	ZIndex = 50,
 }, ScreenGui)
 create("UIListLayout", {
 	Padding = UDim.new(0, 8),
-	HorizontalAlignment = Enum.HorizontalAlignment.Right,
-	VerticalAlignment = Enum.VerticalAlignment.Bottom,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, ToastHolder)
 
--- kind : "info" (defaut), "success" ou "error". duration : secondes avant
--- disparition (defaut 3.5).
+-- kind : "info" (defaut), "success", "warn" ou "error". duration : secondes
+-- avant disparition (defaut 3.5).
 local function notify(text, kind, duration)
 	if unloaded then return end
 	duration = duration or 3.5
@@ -1774,111 +1970,104 @@ local function notify(text, kind, duration)
 
 	-- Rafale de notifications : on vire tout de suite les plus anciennes en
 	-- trop plutot que de laisser la pile grossir indefiniment.
-	while #activeToasts >= 4 do
+	while #activeToasts >= TOAST.Max do
 		local oldest = table.remove(activeToasts, 1)
 		if oldest and oldest.Parent then oldest:Destroy() end
 	end
 
-	local toast = create("Frame", {
+	-- CanvasGroup : tout le toast fond d'un coup (GroupTransparency) au lieu
+	-- d'animer chaque morceau. 1 px de marge : le contour de la pilule est
+	-- dessine a l'exterieur de son cadre et serait sinon coupe.
+	TOAST.seq = TOAST.seq - 1
+	local toast = create("CanvasGroup", {
 		Size = UDim2.new(0, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = Theme.Panel,
+		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		ClipsDescendants = true,
+		GroupTransparency = 1,
+		LayoutOrder = TOAST.seq,
 	}, ToastHolder)
-	corner(toast, 4)
-	local stroke = create("UIStroke", { Color = Theme.Stroke, Transparency = 1 }, toast)
 	create("UIPadding", {
-		PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
-		PaddingLeft = UDim.new(0, 11), PaddingRight = UDim.new(0, 11),
+		PaddingTop = UDim.new(0, 1), PaddingBottom = UDim.new(0, 1),
+		PaddingLeft = UDim.new(0, 1), PaddingRight = UDim.new(0, 1),
 	}, toast)
-	create("UIListLayout", {
-		FillDirection = Enum.FillDirection.Vertical,
-		Padding = UDim.new(0, 10),
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, toast)
-
+	local scale = create("UIScale", { Scale = 0.9 }, toast)
 	table.insert(activeToasts, toast)
 
-	local HeaderRow = create("Frame", {
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 1,
-		LayoutOrder = 1,
+	local pill = create("Frame", {
+		Size = UDim2.new(0, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.XY,
+		BackgroundColor3 = Theme.Background,
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
 	}, toast)
+	Skin.round(pill, 22)
+	create("UIStroke", { Color = Theme.Text, Transparency = 0.86, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, pill)
+	create("UIPadding", {
+		PaddingTop = UDim.new(0, 9), PaddingBottom = UDim.new(0, 9),
+		PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 18),
+	}, pill)
 	create("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		Padding = UDim.new(0, 10),
+		VerticalAlignment = Enum.VerticalAlignment.Center,
 		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, HeaderRow)
+	}, pill)
 
-	local IconChip = create("Frame", {
-		Size = UDim2.new(0, 20, 0, 20),
+	-- Pastille ronde de la couleur du type, symbole couleur fond par-dessus.
+	local icon = create("Frame", {
+		Size = UDim2.new(0, 22, 0, 22),
 		BackgroundColor3 = styleColor,
-		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
 		LayoutOrder = 1,
-	}, HeaderRow)
-	corner(IconChip, 3)
-	local iconStroke = create("UIStroke", { Color = styleColor, Transparency = 1 }, IconChip)
-	local glyph = create("TextLabel", {
+	}, pill)
+	Skin.round(icon)
+	create("TextLabel", {
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		Text = style.Glyph,
-		Font = Enum.Font.GothamBold,
-		TextSize = 15,
-		TextColor3 = styleColor,
-		TextTransparency = 1,
-		TextXAlignment = Enum.TextXAlignment.Center,
-		TextYAlignment = Enum.TextYAlignment.Center,
-	}, IconChip)
+		Font = Enum.Font.GothamBlack,
+		TextSize = 13,
+		TextColor3 = Theme.Background,
+	}, icon)
 
 	local label = create("TextLabel", {
-		Size = UDim2.new(0, TOAST.Width - 22 - 20 - 10, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(0, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
-		TextSize = 15,
+		TextSize = 14,
 		TextColor3 = Theme.Text,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTransparency = 1,
 		LayoutOrder = 2,
-	}, HeaderRow)
+	}, pill)
+	create("UISizeConstraint", { MaxSize = Vector2.new(TOAST.TextMax, math.huge) }, label)
 
-	local ProgressTrack = create("Frame", {
-		Size = UDim2.new(1, 0, 0, 4),
-		BackgroundColor3 = Theme.Element,
-		BackgroundTransparency = 1,
-		LayoutOrder = 2,
-	}, toast)
-	corner(ProgressTrack, 2)
-	local ProgressFill = create("Frame", {
-		Size = UDim2.new(1, 0, 1, 0),
+	-- Barre de temps restant : 2 px sous le texte, posee sur le CanvasGroup
+	-- (hors de la liste) pour ne pas pousser la mise en page.
+	local progress = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -4),
+		Size = UDim2.new(1, -44, 0, 2),
 		BackgroundColor3 = styleColor,
-		BackgroundTransparency = 1,
-	}, ProgressTrack)
-	corner(ProgressFill, 2)
+		BackgroundTransparency = 0.35,
+		BorderSizePixel = 0,
+		ZIndex = 2,
+	}, toast)
+	Skin.round(progress)
 
-	tweenStyled(toast, { Size = UDim2.new(0, TOAST.Width, 0, 0), BackgroundTransparency = 0 }, 0.25)
-	tween(stroke, { Transparency = 0.35 }, 0.2)
-	tween(iconStroke, { Transparency = 0.4 }, 0.2)
-	tween(IconChip, { BackgroundTransparency = 0.85 }, 0.2)
-	tween(glyph, { TextTransparency = 0 }, 0.22)
-	tween(label, { TextTransparency = 0 }, 0.22)
-	tween(ProgressTrack, { BackgroundTransparency = 0 }, 0.2)
-	tween(ProgressFill, { BackgroundTransparency = 0.15 }, 0.2)
+	Skin.ease(toast, { GroupTransparency = 0 }, 0.2)
+	Skin.ease(scale, { Scale = 1 }, 0.32, Enum.EasingStyle.Back)
 	-- Linear et duree exacte : la barre reflete le temps restant reel, pas un effet decoratif.
-	TweenService:Create(ProgressFill, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 1, 0) }):Play()
+	TweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 0, 2) }):Play()
 
 	task.delay(duration, function()
 		if not toast.Parent then return end
 		local index = table.find(activeToasts, toast)
 		if index then table.remove(activeToasts, index) end
-		tween(toast, { BackgroundTransparency = 1, Size = UDim2.new(0, 0, 0, 0) }, 0.18)
-		tween(stroke, { Transparency = 1 }, 0.18)
-		tween(label, { TextTransparency = 1 }, 0.12)
-		tween(glyph, { TextTransparency = 1 }, 0.12)
+		Skin.ease(toast, { GroupTransparency = 1 }, 0.18)
+		Skin.ease(scale, { Scale = 0.94 }, 0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 		task.wait(0.18)
 		toast:Destroy()
 	end)
@@ -2501,342 +2690,255 @@ do
 	end
 end
 
-local WINDOW = { MIN_W = 420, MIN_H = 340, MAX_W = 900, MAX_H = 700 }
+local WINDOW = { MIN_W = 520, MIN_H = 380, MAX_W = 900, MAX_H = 700 }
 
--- Chassis "Compact" : barre de titre fine, onglets en bande horizontale sous
--- la barre de titre (plus de colonne laterale : sa largeur revient au
--- contenu), et barre d'etat en bas. Regroupes dans une table plutot qu'en
--- constantes separees (limite des 200 registres - voir la note en tete de
--- fichier) ; MenuChrome recoit plus bas les instances qu'il faut retrouver
--- depuis ailleurs (recherche, barre d'etat).
-local MenuChrome = { TopBar = 44, Tabs = 34, Status = 24, bands = {}, rows = {}, blocks = {}, drops = {} }
-local TOPBAR_HEIGHT = MenuChrome.TopBar
+-- Chassis "Rail flottant" : une fenetre de verre (en-tete + pages) et, a sa
+-- gauche, une capsule d'icones detachee pour changer de page. MenuChrome
+-- regroupe les dimensions et les instances qu'on doit retrouver depuis
+-- ailleurs (recherche, ligne d'etat, rail) - une table plutot que des locals
+-- separes (limite des 200 registres, voir la note en tete de fichier).
+local MenuChrome = { Header = 76, bands = {}, rows = {}, blocks = {}, drops = {} }
 
--- Taille "cible" (celle vers laquelle on anime a l'ouverture, et que le
--- redimensionnement met a jour) ; separee de Main.Size car cette derniere
--- vaut temporairement (0,0,0,0) pendant l'animation d'ouverture/fermeture.
+-- Taille "cible" de la fenetre (celle que le redimensionnement met a jour et
+-- que les Prefs retiennent).
 local targetSize = UDim2.new(
 	0, math.clamp(Prefs.WindowWidth, WINDOW.MIN_W, WINDOW.MAX_W),
 	0, math.clamp(Prefs.WindowHeight, WINDOW.MIN_H, WINDOW.MAX_H)
 )
 
--- Il y avait ici un halo (Frame teinte accent) + une ombre (Frame noire),
--- tous deux plus grands que la fenetre et poses derriere pour donner un effet
--- "flottant". Retire : Roblox ne sait pas flouter un Frame, donc c'etait deux
--- rectangles nets aux bords francs autour de la fenetre - ca se voyait comme
--- un halo sale plutot que comme une ombre. Le contour de 1 px sur Main suffit
--- a detacher la fenetre du jeu.
-
-local Main = Skin.paint(create("Frame", {
+-- Decalee de 37 px vers la droite : le rail (60 px + 14 d'ecart) deborde a
+-- gauche, l'ensemble rail + fenetre reste ainsi centre a l'ecran.
+local Main = create("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
+	Position = UDim2.new(0.5, 37, 0.5, 0),
 	Size = targetSize,
 	Visible = false,
 	Active = true,
-	ZIndex = 1,
-}, ScreenGui), { BackgroundColor3 = "Background" })
-corner(Main, 5)
-Skin.paint(create("UIStroke", { Transparency = 0 }, Main), { Color = "Stroke" })
-
--- Ecran de "chargement" joue a chaque ouverture : masque le contenu derriere
--- un voile + 3 points qui pulsent en cascade, puis se dissout pour reveler le
--- menu (deja construit en dessous). Purement cosmetique, ~0.5s.
-local LoadingOverlay = create("Frame", {
-	Size = UDim2.new(1, 0, 1, 0),
-	BackgroundColor3 = Theme.Background,
-	BackgroundTransparency = 0,
-	ZIndex = 20,
-	Visible = false,
-	Active = true, -- bloque les clics vers ce qu'il masque pendant l'animation
-}, Main)
-corner(LoadingOverlay, 12)
-
-create("TextLabel", {
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 0.5, -8),
-	Size = UDim2.new(0, 200, 0, 24),
-	BackgroundTransparency = 1,
-	Text = "Von Client",
-	Font = Enum.Font.GothamBold,
-	TextSize = 22,
-	TextColor3 = Theme.Text,
-	ZIndex = 21,
-}, LoadingOverlay)
-
-local LoadingDots = {}
-for i = 1, 3 do
-	local dot = create("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, (i - 2) * 16, 0.5, 14),
-		Size = UDim2.new(0, 8, 0, 8),
-		BackgroundColor3 = Theme.Accent,
-		BackgroundTransparency = 0.7,
-		ZIndex = 21,
-	}, LoadingOverlay)
-	corner(dot, 4)
-	table.insert(LoadingDots, dot)
-end
-
-local loadingTweens = {}
-local function playLoadingIntro()
-	for _, t in ipairs(loadingTweens) do t:Cancel() end
-	table.clear(loadingTweens)
-
-	LoadingOverlay.Visible = true
-	LoadingOverlay.BackgroundTransparency = 0
-	for _, dot in ipairs(LoadingDots) do
-		dot.BackgroundTransparency = 0.7
-		dot.Size = UDim2.new(0, 8, 0, 8)
-	end
-
-	for i, dot in ipairs(LoadingDots) do
-		local dotTween = TweenService:Create(
-			dot,
-			TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true, (i - 1) * 0.15),
-			{ BackgroundTransparency = 0, Size = UDim2.new(0, 10, 0, 10) }
-		)
-		dotTween:Play()
-		table.insert(loadingTweens, dotTween)
-	end
-
-	task.delay(0.55, function()
-		for _, t in ipairs(loadingTweens) do t:Cancel() end
-		table.clear(loadingTweens)
-		tween(LoadingOverlay, { BackgroundTransparency = 1 }, 0.2)
-		task.delay(0.2, function()
-			if not Main.Visible then return end -- ferme entre temps : rien a reveler
-			LoadingOverlay.Visible = false
-		end)
-	end)
-end
-
--- Animation d'ouverture/fermeture : leger zoom (96% -> 100%, aucun rebond),
--- plutot que l'ancien pop depuis une taille nulle.
-local WINDOW_OPEN_SCALE = 0.96
-
-local function scaledSize(size, factor)
-	return UDim2.new(0, size.X.Offset * factor, 0, size.Y.Offset * factor)
-end
+}, ScreenGui)
+Skin.glass(Main, Skin.R.Window)
+-- L'animation d'ouverture passe par un UIScale et PAS par Main.Size : changer
+-- Size forcait Roblox a recalculer toute la mise en page (cartes, colonnes,
+-- listes) a chaque frame de l'animation. Le rail, enfant de Main, suit.
+MenuChrome.Scale = create("UIScale", { Scale = 1 }, Main)
 
 local function openWindow()
+	if MenuChrome.closing then
+		MenuChrome.closing:Cancel()
+		MenuChrome.closing = nil
+	end
+	if not Main.Visible then MenuChrome.Scale.Scale = 0.94 end
 	Main.Visible = true
-	Main.Size = scaledSize(targetSize, WINDOW_OPEN_SCALE)
-
-	tweenStyled(Main, { Size = targetSize }, 0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	playLoadingIntro()
+	Skin.ease(MenuChrome.Scale, { Scale = 1 }, 0.3)
 end
 
 local function closeWindow()
-	local closeTween = TweenService:Create(
-		Main,
-		TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-		{ Size = scaledSize(targetSize, WINDOW_OPEN_SCALE) }
-	)
-	closeTween.Completed:Connect(function()
+	if MenuChrome.closing or not Main.Visible then return end
+	if MenuChrome.closeDrops then MenuChrome.closeDrops() end
+	local closeTween = Skin.ease(MenuChrome.Scale, { Scale = 0.94 }, 0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	MenuChrome.closing = closeTween
+	closeTween.Completed:Connect(function(playbackState)
+		if MenuChrome.closing ~= closeTween or playbackState ~= Enum.PlaybackState.Completed then return end
+		MenuChrome.closing = nil
 		Main.Visible = false
-		LoadingOverlay.Visible = false
-		Main.Size = targetSize -- pret pour la prochaine ouverture
 	end)
-	closeTween:Play()
 end
 
 local function toggleWindow()
-	if Main.Visible then closeWindow() else openWindow() end
+	if Main.Visible and not MenuChrome.closing then closeWindow() else openWindow() end
 end
 
 --------------------------------------------------------------------------------
--- Splash d'injection : jouee UNE SEULE fois au chargement du script (pas a
--- chaque ouverture du menu) - vraie barre de progression qui se remplit sur
--- ~1.1s, plutot que les points de playLoadingIntro (reserves aux ouvertures
--- manuelles). A la fin, la fenetre se referme : le menu reste cache par
--- defaut comme avant, la splash sert juste a confirmer le chargement.
+-- Ecran de chargement : jouee UNE SEULE fois au lancement du script. Une carte
+-- de verre au centre (logo, nom, version, barre de progression), qui se
+-- dissout puis laisse la fenetre s'ouvrir avec son animation normale.
+-- CanvasGroup : permet de faire fondre la carte entiere d'un coup
+-- (GroupTransparency) au lieu d'animer chaque element.
 --------------------------------------------------------------------------------
 
-local InjectionOverlay = create("Frame", {
-	Size = UDim2.new(1, 0, 1, 0),
-	BackgroundColor3 = Theme.Background,
-	ZIndex = 25,
-	Visible = false,
-	Active = true,
-}, Main)
-corner(InjectionOverlay, 12)
-
-local InjectionLogo = create("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, -46),
-	Size = UDim2.new(0, 64, 0, 64),
-	BackgroundColor3 = Theme.Accent,
-	ZIndex = 26,
-}, InjectionOverlay)
-corner(InjectionLogo, 18)
-gradient(InjectionLogo, ColorSequence.new(Theme.Accent, Theme.AccentDim), 45)
-create("TextLabel", {
-	Size = UDim2.new(1, 0, 1, 0),
-	BackgroundTransparency = 1,
-	Text = "V",
-	Font = Enum.Font.GothamBold,
-	TextSize = 34,
-	TextColor3 = Color3.new(1, 1, 1),
-	ZIndex = 27,
-}, InjectionLogo)
-
-create("TextLabel", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 8),
-	Size = UDim2.new(0, 240, 0, 26),
-	BackgroundTransparency = 1,
-	Text = "Von Client",
-	Font = Enum.Font.GothamBold,
-	TextSize = 22,
-	TextColor3 = Theme.Text,
-	ZIndex = 26,
-}, InjectionOverlay)
-
-local ProgressBarBack = create("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 42),
-	Size = UDim2.new(0, 220, 0, 6),
-	BackgroundColor3 = Theme.Element,
-	ZIndex = 26,
-}, InjectionOverlay)
-corner(ProgressBarBack, 3)
-
-local ProgressBarFill = create("Frame", {
-	Size = UDim2.new(0, 0, 1, 0),
-	BackgroundColor3 = Theme.Accent,
-	ZIndex = 27,
-}, ProgressBarBack)
-corner(ProgressBarFill, 3)
-gradient(ProgressBarFill, ColorSequence.new(Theme.Accent, Theme.AccentDim), 0)
-
-local ProgressLabel = create("TextLabel", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 64),
-	Size = UDim2.new(0, 220, 0, 16),
-	BackgroundTransparency = 1,
-	Text = "Chargement... 0%",
-	Font = Enum.Font.GothamMedium,
-	TextSize = 14,
-	TextColor3 = Theme.SubText,
-	ZIndex = 26,
-}, InjectionOverlay)
-
 local function playInjectionSplash()
-	InjectionOverlay.Visible = true
-	InjectionOverlay.BackgroundTransparency = 0
-	ProgressBarFill.Size = UDim2.new(0, 0, 1, 0)
-	ProgressLabel.Text = "Chargement... 0%"
+	local group = create("CanvasGroup", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(324, 236),
+		BackgroundTransparency = 1,
+		GroupTransparency = 1,
+		ZIndex = 60,
+	}, ScreenGui)
+	local scale = create("UIScale", { Scale = 0.92 }, group)
+	-- Carte en retrait de 2 px : le contour (dessine a l'exterieur du cadre)
+	-- serait sinon coupe par le CanvasGroup.
+	local card = create("Frame", { Position = UDim2.fromOffset(2, 2), Size = UDim2.new(1, -4, 1, -4) }, group)
+	Skin.glass(card, 22, 0.1)
+	create("UIPadding", { PaddingTop = UDim.new(0, 30), PaddingLeft = UDim.new(0, 28), PaddingRight = UDim.new(0, 28) }, card)
+	create("UIListLayout", {
+		Padding = UDim.new(0, 4),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, card)
 
-	Main.Visible = true
-	Main.Size = scaledSize(targetSize, WINDOW_OPEN_SCALE)
-	tweenStyled(Main, { Size = targetSize }, 0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	local logo = Skin.paint(create("Frame", { Size = UDim2.fromOffset(64, 64), BorderSizePixel = 0, LayoutOrder = 1 }, card), { BackgroundColor3 = "Accent" })
+	Skin.round(logo)
+	Skin.paint(create("UIStroke", { Thickness = 8, Transparency = 0.85 }, logo), { Color = "Accent" })
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+		Text = "V", Font = Enum.Font.GothamBlack, TextSize = 30,
+	}, logo), { TextColor3 = "OnAccent" })
+	create("Frame", { Size = UDim2.fromOffset(1, 10), BackgroundTransparency = 1, LayoutOrder = 2 }, card)
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1,
+		Text = "Von Client", Font = Enum.Font.GothamBlack, TextSize = 20, LayoutOrder = 3,
+	}, card), { TextColor3 = "Text" })
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
+		Text = "v3.0", Font = Enum.Font.Code, TextSize = 11, LayoutOrder = 4,
+	}, card), { TextColor3 = "SubText" })
+	create("Frame", { Size = UDim2.fromOffset(1, 14), BackgroundTransparency = 1, LayoutOrder = 5 }, card)
+
+	local barBack = Skin.veil(create("Frame", { Size = UDim2.new(1, 0, 0, 6), LayoutOrder = 6 }, card), Skin.A.Track)
+	Skin.round(barBack)
+	local barFill = Skin.paint(create("Frame", { Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0 }, barBack), { BackgroundColor3 = "Accent" })
+	Skin.round(barFill)
+
+	local footer = create("Frame", { Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, LayoutOrder = 7 }, card)
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, -50, 1, 0), BackgroundTransparency = 1,
+		Text = "Chargement des reglages...", Font = Enum.Font.GothamMedium, TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, footer), { TextColor3 = "SubText" })
+	local pctLabel = Skin.paint(create("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), Size = UDim2.new(0, 50, 1, 0),
+		BackgroundTransparency = 1, Text = "0 %", Font = Enum.Font.Code, TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, footer), { TextColor3 = "SubText" })
+
+	Skin.ease(group, { GroupTransparency = 0 }, 0.25)
+	Skin.ease(scale, { Scale = 1 }, 0.35, Enum.EasingStyle.Back)
 
 	local DURATION = 1.1
 	local startTime = os.clock()
 	task.spawn(function()
-		while true do
+		while group.Parent do
 			local pct = math.clamp((os.clock() - startTime) / DURATION, 0, 1)
-			ProgressBarFill.Size = UDim2.new(pct, 0, 1, 0)
-			ProgressLabel.Text = string.format("Chargement... %d%%", math.floor(pct * 100))
+			barFill.Size = UDim2.new(pct, 0, 1, 0)
+			pctLabel.Text = string.format("%d %%", math.floor(pct * 100))
 			if pct >= 1 then break end
 			task.wait()
 		end
-	end)
-
-	task.delay(DURATION + 0.15, function()
-		tween(InjectionOverlay, { BackgroundTransparency = 1 }, 0.25)
-		task.delay(0.25, function()
-			InjectionOverlay.Visible = false
-			-- Le menu reste ouvert apres la splash (pas de closeWindow() ici).
-		end)
+		task.wait(0.15)
+		Skin.ease(group, { GroupTransparency = 1 }, 0.22)
+		Skin.ease(scale, { Scale = 1.04 }, 0.22)
+		task.wait(0.22)
+		group:Destroy()
+		openWindow()
 	end)
 end
 
--- Pas de fond visible : juste un Frame transparent qui sert de zone de drag
--- et de conteneur pour le logo/titre/bouton fermer, poses directement sur le
--- fond de Main (plus de "barre noire" separee).
-local TopBar = create("Frame", { Size = UDim2.new(1, 0, 0, TOPBAR_HEIGHT), BackgroundTransparency = 1 }, Main)
+-- En-tete : titre de la page courante, ligne d'etat (boss suivi, config,
+-- touche du menu), recherche et fermeture. Sert aussi de poignee pour
+-- deplacer la fenetre.
+MenuChrome.HeaderFrame = create("Frame", { Size = UDim2.new(1, 0, 0, MenuChrome.Header), BackgroundTransparency = 1 }, Main)
+do
+	local header = MenuChrome.HeaderFrame
 
--- Fond de la barre de titre : un ton au-dessus du fond de fenetre, comme la
--- bande d'onglets et la barre d'etat - les trois cadres du chassis se lisent
--- ainsi comme un meme calque autour du contenu.
-Skin.paint(TopBar, { BackgroundColor3 = "Panel" })
-TopBar.BackgroundTransparency = 0
-Skin.paint(create("Frame", { -- filet de separation (pas de UIStroke : il ferait le tour)
-	Position = UDim2.new(0, 0, 1, -1),
-	Size = UDim2.new(1, 0, 0, 1),
-	BorderSizePixel = 0,
-}, TopBar), { BackgroundColor3 = "Stroke" })
+	MenuChrome.PageTitle = Skin.paint(create("TextLabel", {
+		Position = UDim2.fromOffset(22, 16),
+		Size = UDim2.new(1, -330, 0, 30),
+		BackgroundTransparency = 1,
+		Text = "",
+		Font = Enum.Font.GothamBlack,
+		TextSize = 24,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, header), { TextColor3 = "Text" })
 
-Skin.paint(create("TextLabel", {
-	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 10, 0, 0),
-	Size = UDim2.new(0, 96, 1, 0),
-	Text = "Von Client",
-	Font = Enum.Font.GothamBold,
-	TextSize = 15,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, TopBar), { TextColor3 = "Text" })
+	-- Ligne d'etat sous le titre (remplace l'ancienne barre d'etat du bas) :
+	-- remplie par MenuChrome.setStatus / MenuChrome.refreshRight.
+	local statusLine = create("Frame", {
+		Position = UDim2.fromOffset(22, 47),
+		Size = UDim2.new(1, -330, 0, 14),
+		BackgroundTransparency = 1,
+		ClipsDescendants = true,
+	}, header)
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 12),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, statusLine)
+	MenuChrome.StatusLeft = Skin.paint(create("TextLabel", {
+		Size = UDim2.new(0, 0, 1, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1,
+		Text = "BOSS --",
+		Font = Enum.Font.Code,
+		TextSize = 11,
+		LayoutOrder = 1,
+	}, statusLine), { TextColor3 = "SubText" })
+	MenuChrome.StatusRight = Skin.paint(create("TextLabel", {
+		Size = UDim2.new(0, 0, 1, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1,
+		Text = "",
+		Font = Enum.Font.Code,
+		TextSize = 11,
+		LayoutOrder = 2,
+	}, statusLine), { TextColor3 = "SubTextDim" })
 
-Skin.paint(create("TextLabel", {
-	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 106, 0, 0),
-	Size = UDim2.new(0, 44, 1, 0),
-	Text = "v2.4",
-	Font = Enum.Font.Code,
-	TextSize = 13,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, TopBar), { TextColor3 = "SubTextDim" })
+	-- Recherche : filtre les lignes de la page courante par leur libelle (voir
+	-- MenuChrome.applyFilter, defini apres addSection).
+	local searchBar = Skin.veil(create("Frame", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -66, 0, 18),
+		Size = UDim2.new(0, 220, 0, 36),
+	}, header), 0.93)
+	Skin.round(searchBar)
+	local searchStroke = Skin.edge(searchBar, 0.92)
+	local searchIcon = Skin.icon("Recherche", searchBar, "SubText", 16)
+	searchIcon.Position = UDim2.new(0, 22, 0.5, 0)
 
--- Recherche : filtre les lignes de la page courante par leur libelle, et
--- masque les sections qui n'ont plus rien a montrer. Le filtrage lui-meme vit
--- dans MenuChrome.applyFilter (defini apres addSection, qui enregistre les
--- lignes au fur et a mesure).
-local SearchBar = Skin.paint(create("Frame", {
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -52, 0.5, 0),
-	Size = UDim2.new(0, 190, 0, 26),
-}, TopBar), { BackgroundColor3 = "Background" })
-corner(SearchBar, 3)
-Skin.paint(create("UIStroke", { Transparency = 0 }, SearchBar), { Color = "Stroke" })
+	MenuChrome.Search = Skin.paint(create("TextBox", {
+		Position = UDim2.fromOffset(36, 0),
+		Size = UDim2.new(1, -50, 1, 0),
+		BackgroundTransparency = 1,
+		Text = "",
+		PlaceholderText = "Rechercher",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false,
+	}, searchBar), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+	MenuChrome.Search.Focused:Connect(function()
+		Skin.shift(searchStroke, { Color = "Accent" }, { Transparency = 0.2 }, 0.15)
+		Skin.tint(searchIcon, "Accent", true)
+	end)
+	MenuChrome.Search.FocusLost:Connect(function()
+		Skin.shift(searchStroke, { Color = "Text" }, { Transparency = 0.92 }, 0.15)
+		Skin.tint(searchIcon, "SubText", true)
+	end)
 
-MenuChrome.Search = Skin.paint(create("TextBox", {
-	Size = UDim2.new(1, -18, 1, 0),
-	Position = UDim2.new(0, 9, 0, 0),
-	BackgroundTransparency = 1,
-	Text = "",
-	PlaceholderText = "Rechercher un reglage",
-	Font = Enum.Font.GothamMedium,
-	TextSize = 14,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	ClearTextOnFocus = false,
-}, SearchBar), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
+	local closeButton = Skin.veil(create("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -20, 0, 18),
+		Size = UDim2.fromOffset(36, 36),
+		Text = "",
+		AutoButtonColor = false,
+	}, header), 0.93)
+	Skin.round(closeButton)
+	local closeIcon = Skin.icon("Fermer", closeButton, "Text", 16)
+	closeButton.MouseButton1Click:Connect(closeWindow)
+	closeButton.MouseEnter:Connect(function()
+		Skin.shift(closeButton, { BackgroundColor3 = "Danger" }, { BackgroundTransparency = Skin.A.Tint }, 0.12)
+		Skin.tint(closeIcon, "Danger", true)
+	end)
+	closeButton.MouseLeave:Connect(function()
+		Skin.shift(closeButton, { BackgroundColor3 = "Text" }, { BackgroundTransparency = 0.93 }, 0.12)
+		Skin.tint(closeIcon, "Text", true)
+	end)
+end
 
-local CloseButton = Skin.paint(create("TextButton", {
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -8, 0.5, 0),
-	Size = UDim2.new(0, 30, 0, 26),
-	BackgroundTransparency = 1,
-	Text = "✕",
-	Font = Enum.Font.GothamBold,
-	TextSize = 15,
-	AutoButtonColor = false,
-}, TopBar), { TextColor3 = "SubText", BackgroundColor3 = "ElementHover" })
-corner(CloseButton, 3)
-CloseButton.MouseButton1Click:Connect(closeWindow)
-CloseButton.MouseEnter:Connect(function()
-	CloseButton.BackgroundTransparency = 0
-	tween(CloseButton, { TextColor3 = Theme.Text }, 0.1)
-end)
-CloseButton.MouseLeave:Connect(function()
-	CloseButton.BackgroundTransparency = 1
-	tween(CloseButton, { TextColor3 = Theme.SubText }, 0.1)
-end)
-
--- Drag de la fenetre (via la barre de titre)
+-- Drag de la fenetre (via l'en-tete)
 do
 	local dragging, dragStart, startPos
-	TopBar.InputBegan:Connect(function(input)
+	MenuChrome.HeaderFrame.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
@@ -2854,23 +2956,22 @@ do
 	end)
 end
 
--- Redimensionnement (poignee en bas a droite), clampe entre les tailles min/max,
--- sauvegarde dans Settings pour retrouver la meme taille au prochain chargement.
-local ResizeHandle = Skin.paint(create("Frame", {
-	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -4, 1, -4),
-	Size = UDim2.new(0, 10, 0, 10),
-	BackgroundTransparency = 0.4,
-	Active = true,
-	ZIndex = 10, -- cree avant TabStrip/PagesHolder : sans ca, ces derniers (meme ZIndex par defaut) le recouvriraient
-}, Main), { BackgroundColor3 = "StrokeStrong" })
-corner(ResizeHandle, 2)
-ResizeHandle.MouseEnter:Connect(function() tween(ResizeHandle, { BackgroundTransparency = 0 }, 0.1) end)
-ResizeHandle.MouseLeave:Connect(function() tween(ResizeHandle, { BackgroundTransparency = 0.4 }, 0.1) end)
-
+-- Redimensionnement (poignee discrete en bas a droite), clampe entre les
+-- tailles min/max, sauvegarde dans les Prefs pour la prochaine fois.
 do
+	local handle = Skin.veil(create("Frame", {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -8, 1, -8),
+		Size = UDim2.fromOffset(8, 8),
+		Active = true,
+		ZIndex = 10,
+	}, Main), 0.75)
+	Skin.round(handle)
+	handle.MouseEnter:Connect(function() Skin.ease(handle, { BackgroundTransparency = 0.3, Size = UDim2.fromOffset(10, 10) }, 0.12) end)
+	handle.MouseLeave:Connect(function() Skin.ease(handle, { BackgroundTransparency = 0.75, Size = UDim2.fromOffset(8, 8) }, 0.12) end)
+
 	local resizing, resizeStart, startSize
-	ResizeHandle.InputBegan:Connect(function(input)
+	handle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			resizing = true
 			resizeStart = input.Position
@@ -2896,69 +2997,83 @@ do
 	end)
 end
 
--- Bande d'onglets horizontale (remplace l'ancienne colonne laterale de 150 px,
--- dont la largeur revient maintenant au contenu). L'onglet actif est marque par
--- un trait de 2 px sous le libelle, pas par un fond : moins de bruit visuel a
--- six onglets cote a cote.
-local TabStrip = Skin.paint(create("Frame", {
-	Position = UDim2.new(0, 0, 0, MenuChrome.TopBar),
-	Size = UDim2.new(1, 0, 0, MenuChrome.Tabs),
-}, Main), { BackgroundColor3 = "Panel" })
-create("UIListLayout", {
-	FillDirection = Enum.FillDirection.Horizontal,
-	SortOrder = Enum.SortOrder.LayoutOrder,
-}, TabStrip)
-create("UIPadding", { PaddingLeft = UDim.new(0, 8) }, TabStrip)
+-- Rail flottant : capsule de verre detachee a gauche de la fenetre. En haut le
+-- logo et les pages, en bas (separe par un trait) Settings. Une bulle affiche
+-- le nom de la page survolee. Enfant de Main : il suit le drag et l'animation.
+do
+	local rail = create("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(0, -14, 0.5, 0),
+		Size = UDim2.new(0, 60, 1, -24),
+		Active = true,
+		ZIndex = 5,
+	}, Main)
+	Skin.glass(rail, 30)
+	MenuChrome.Rail = rail
 
--- Filet sous la bande d'onglets, pose dans Main et PAS dans TabStrip : ce
--- dernier a un UIListLayout, qui rangerait le filet comme un onglet de plus et
--- casserait la rangee.
-Skin.paint(create("Frame", {
-	Position = UDim2.new(0, 0, 0, MenuChrome.TopBar + MenuChrome.Tabs - 1),
-	Size = UDim2.new(1, 0, 0, 1),
-	BorderSizePixel = 0,
-	ZIndex = 2,
-}, Main), { BackgroundColor3 = "Stroke" })
+	MenuChrome.RailTop = create("Frame", { Size = UDim2.new(1, 0, 1, -64), BackgroundTransparency = 1 }, rail)
+	create("UIListLayout", {
+		Padding = UDim.new(0, 4),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, MenuChrome.RailTop)
+	create("UIPadding", { PaddingTop = UDim.new(0, 10) }, MenuChrome.RailTop)
 
--- Barre d'etat : ce qu'on veut voir sans ouvrir de page (boss suivi et ses PV,
--- liaison a l'overlay Python, config chargee, touche du menu). Remplie par
--- MenuChrome.setStatus, appelee depuis Auto Boss et le chargement de config.
-local StatusBar = Skin.paint(create("Frame", {
-	Position = UDim2.new(0, 0, 1, -MenuChrome.Status),
-	Size = UDim2.new(1, 0, 0, MenuChrome.Status),
-}, Main), { BackgroundColor3 = "Panel" })
-Skin.paint(create("Frame", {
-	Size = UDim2.new(1, 0, 0, 1),
-	BorderSizePixel = 0,
-}, StatusBar), { BackgroundColor3 = "Stroke" })
+	local logo = Skin.paint(create("Frame", { Size = UDim2.fromOffset(40, 40), BorderSizePixel = 0, LayoutOrder = 0 }, MenuChrome.RailTop), { BackgroundColor3 = "Accent" })
+	Skin.round(logo)
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+		Text = "V", Font = Enum.Font.GothamBlack, TextSize = 18,
+	}, logo), { TextColor3 = "OnAccent" })
+	create("Frame", { Size = UDim2.fromOffset(1, 6), BackgroundTransparency = 1, LayoutOrder = 1 }, MenuChrome.RailTop)
 
-MenuChrome.StatusLeft = Skin.paint(create("TextLabel", {
-	Position = UDim2.new(0, 10, 0, 0),
-	Size = UDim2.new(0.6, -10, 1, 0),
-	BackgroundTransparency = 1,
-	Text = "BOSS --",
-	Font = Enum.Font.Code,
-	TextSize = 13,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, StatusBar), { TextColor3 = "SubText" })
+	MenuChrome.RailBottom = create("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, -10),
+		Size = UDim2.new(1, 0, 0, 52),
+		BackgroundTransparency = 1,
+	}, rail)
+	Skin.veil(create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 0),
+		Size = UDim2.fromOffset(26, 1),
+	}, MenuChrome.RailBottom), 0.85)
 
--- Decalee de 20 px de plus vers la gauche que la moitie gauche : la poignee de
--- redimensionnement occupe le coin en bas a droite, juste au-dessus.
-MenuChrome.StatusRight = Skin.paint(create("TextLabel", {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -22, 0, 0),
-	Size = UDim2.new(0.4, -22, 1, 0),
-	BackgroundTransparency = 1,
-	Text = "",
-	Font = Enum.Font.Code,
-	TextSize = 13,
-	TextXAlignment = Enum.TextXAlignment.Right,
-}, StatusBar), { TextColor3 = "SubTextDim" })
+	MenuChrome.Bubble = Skin.paint(create("TextLabel", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = UDim2.fromOffset(0, 26),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1,
+		TextTransparency = 1,
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		Visible = false,
+		ZIndex = 30,
+	}, rail), { BackgroundColor3 = "Text", TextColor3 = "Background" })
+	Skin.round(MenuChrome.Bubble)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 11), PaddingRight = UDim.new(0, 11) }, MenuChrome.Bubble)
+end
 
--- boss/hp peuvent etre nil (aucun boss suivi) : la moitie gauche retombe alors
--- sur "BOSS --". La moitie droite (config + touche menu) ne bouge qu'au
--- chargement d'une config ou au rebind, donc elle est reconstruite ici a chaque
--- appel plutot que d'etre pilotee separement.
+-- Affiche la bulle a droite du bouton survole (nil = la cacher).
+function MenuChrome.showBubble(button, text)
+	local bubble = MenuChrome.Bubble
+	if not button then
+		Skin.ease(bubble, { BackgroundTransparency = 1, TextTransparency = 1 }, 0.1)
+		return
+	end
+	local rail = MenuChrome.Rail
+	local scale = MenuChrome.Scale.Scale
+	local y = (button.AbsolutePosition.Y - rail.AbsolutePosition.Y + button.AbsoluteSize.Y / 2) / scale
+	bubble.Text = text
+	bubble.Position = UDim2.fromOffset(rail.AbsoluteSize.X / scale + 4, y)
+	bubble.Visible = true
+	Skin.ease(bubble, { BackgroundTransparency = 0.04, TextTransparency = 0, Position = UDim2.fromOffset(rail.AbsoluteSize.X / scale + 10, y) }, 0.16)
+end
+
+-- boss/hp peuvent etre nil (aucun boss suivi) : la ligne retombe alors sur
+-- "BOSS --". La partie droite (config + touche menu) ne bouge qu'au
+-- chargement d'une config ou au rebind, donc reconstruite a chaque appel.
 function MenuChrome.setStatus(boss, hp, maxHp)
 	if boss and hp and maxHp then
 		MenuChrome.StatusLeft.Text = string.format("BOSS %s  %d/%d", string.upper(boss), hp, maxHp)
@@ -2977,153 +3092,149 @@ function MenuChrome.refreshRight()
 	)
 end
 
--- Pas de ClipsDescendants ici : les pages sont des ScrollingFrame, qui
--- decoupent deja leur propre contenu. En ajouter un a ce niveau tronquait les
--- listes de selecteurs ouvertes pres du bas de page (voir buildDropList, dont
--- le panneau est desormais parente a Main pour cette raison).
+-- Zone des pages, sous l'en-tete. Pas de ClipsDescendants ici : les pages sont
+-- des ScrollingFrame qui decoupent deja leur contenu (les listes deroulantes,
+-- elles, flottent dans Main pour ne jamais etre coupees - voir buildDropList).
 local PagesHolder = create("Frame", {
-	Position = UDim2.new(0, 0, 0, MenuChrome.TopBar + MenuChrome.Tabs),
-	Size = UDim2.new(1, 0, 1, -(MenuChrome.TopBar + MenuChrome.Tabs + MenuChrome.Status)),
+	Position = UDim2.new(0, 0, 0, MenuChrome.Header),
+	Size = UDim2.new(1, 0, 1, -(MenuChrome.Header + 10)),
 	BackgroundTransparency = 1,
 }, Main)
 
 local pages, sidebarButtons, currentPage = {}, {}, nil
 
 local function selectPage(name)
-	-- Les panneaux de selecteurs flottent dans PagesHolder, pas dans leur page :
-	-- un panneau laisse ouvert resterait visible par-dessus le nouvel onglet.
+	-- Les panneaux de selecteurs flottent dans Main, pas dans leur page : un
+	-- panneau laisse ouvert resterait visible par-dessus le nouvel onglet.
 	if MenuChrome.closeDrops then MenuChrome.closeDrops() end
 
 	if currentPage then
 		local prev = sidebarButtons[currentPage]
-		prev.Label.TextColor3 = Theme.SubText
-		prev.Underline.BackgroundTransparency = 1
+		Skin.ease(prev.Button, { BackgroundTransparency = 1 }, 0.18)
+		Skin.tint(prev.Icon, "SubText", true)
 		pages[currentPage].Visible = false
 	end
 
+	-- Bouton actif : pilule pleine couleur texte, icone couleur fond.
 	local current = sidebarButtons[name]
-	pages[name].Visible = true
-	current.Label.TextColor3 = Theme.Accent
-	current.Underline.BackgroundColor3 = Theme.Accent
-	current.Underline.BackgroundTransparency = 0
+	Skin.ease(current.Button, { BackgroundTransparency = 0.06 }, 0.18)
+	Skin.tint(current.Icon, "Background", true)
 	currentPage = name
+	MenuChrome.PageTitle.Text = name
+
+	-- Arrivee de la page : petit glissement vers le haut (10 px), bon marche
+	-- puisque seule la position du ScrollingFrame change.
+	local page = pages[name]
+	page.Visible = true
+	page.Position = UDim2.fromOffset(0, 10)
+	Skin.ease(page, { Position = UDim2.fromOffset(0, 0) }, 0.28)
 
 	-- La page vient de devenir visible : au prochain pas de rendu, Roblox aura
 	-- calcule la hauteur de ses cards et MenuChrome.balance pourra les repartir
 	-- entre les deux colonnes (voir sa note). Ne fait rien aux appels suivants.
 	if MenuChrome.balance then
-		task.defer(MenuChrome.balance, pages[name])
+		task.defer(MenuChrome.balance, page)
 	end
 	-- La recherche est globale au menu mais s'applique page par page : en
-	-- changeant d'onglet, on rejoue le filtre sur la nouvelle page (sinon on
-	-- arrive sur une page complete alors que le champ est encore rempli).
+	-- changeant d'onglet, on rejoue le filtre sur la nouvelle page.
 	if MenuChrome.applyFilter then MenuChrome.applyFilter() end
 end
 
--- accentColor n'est plus utilise (une couleur par categorie faisait six accents
--- concurrents dans une bande horizontale) : l'onglet actif prend simplement
--- l'accent du theme. Le parametre reste accepte pour ne pas avoir a toucher les
--- six appels createCategory plus bas.
+-- accentColor n'est plus utilise (l'accent vient du theme) : le parametre
+-- reste accepte pour ne pas toucher les appels createCategory plus bas.
+-- L'icone du bouton est choisie d'apres le nom de la page (Skin.ICONS) ;
+-- "Settings" va dans le groupe du bas du rail.
 local function createCategory(name, accentColor)
-	-- Largeur estimee d'apres le nombre de caracteres (Gotham Medium 14 fait
-	-- ~8 px/caractere) : les six onglets doivent tenir cote a cote meme a la
-	-- largeur MINIMALE de fenetre (420), sinon les derniers sont coupes.
-	-- Total a 8/caractere + 18 de marge : ~388 px, plus les 8 px de retrait a
-	-- gauche - ca passe tout juste, ne pas augmenter sans relever WINDOW.MIN_W.
-	local Button = create("TextButton", {
-		Size = UDim2.new(0, 8 * #name + 18, 1, 0),
-		BackgroundTransparency = 1,
+	local isSettings = name == "Settings"
+	local Button = Skin.veil(create("TextButton", {
+		Size = UDim2.fromOffset(40, 40),
 		Text = "",
 		AutoButtonColor = false,
-	}, TabStrip)
-
-	local Label = Skin.paint(create("TextLabel", {
-		Size = UDim2.new(1, 0, 1, 0),
-		BackgroundTransparency = 1,
-		Text = name,
-		Font = Enum.Font.GothamMedium,
-		TextSize = 15,
-	}, Button), { TextColor3 = "SubText" })
-
-	local Underline = create("Frame", {
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, 0),
-		Size = UDim2.new(1, -10, 0, 2),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ZIndex = 3,
-	}, Button)
+		LayoutOrder = 10 + #MenuChrome.RailTop:GetChildren(),
+	}, isSettings and MenuChrome.RailBottom or MenuChrome.RailTop), 1)
+	if isSettings then
+		Button.AnchorPoint = Vector2.new(0.5, 1)
+		Button.Position = UDim2.new(0.5, 0, 1, 0)
+	end
+	Skin.round(Button)
+	local Icon = Skin.icon(Skin.ICONS[name] and name or "Autres", Button, "SubText", 18)
 
 	Button.MouseButton1Click:Connect(function() selectPage(name) end)
 	Button.MouseEnter:Connect(function()
-		if currentPage ~= name then tween(Label, { TextColor3 = Theme.Text }, 0.1) end
+		MenuChrome.showBubble(Button, name)
+		if currentPage ~= name then
+			Skin.ease(Button, { BackgroundTransparency = 0.9 }, 0.12)
+			Skin.tint(Icon, "Text", true)
+		end
 	end)
 	Button.MouseLeave:Connect(function()
-		if currentPage ~= name then tween(Label, { TextColor3 = Theme.SubText }, 0.1) end
+		MenuChrome.showBubble(nil)
+		if currentPage ~= name then
+			Skin.ease(Button, { BackgroundTransparency = 1 }, 0.12)
+			Skin.tint(Icon, "SubText", true)
+		end
 	end)
 
 	local Page = Skin.paint(create("ScrollingFrame", {
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 4,
+		ScrollBarThickness = 3,
+		ScrollBarImageTransparency = 0.6,
 		CanvasSize = UDim2.new(0, 0, 0, 0),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		Visible = false,
-	}, PagesHolder), { ScrollBarImageColor3 = "Stroke" })
-	create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, Page)
+	}, PagesHolder), { ScrollBarImageColor3 = "Text" })
+	create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, Page)
 	create("UIPadding", {
-		PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+		PaddingTop = UDim.new(0, 2), PaddingLeft = UDim.new(0, 20),
+		PaddingRight = UDim.new(0, 16), PaddingBottom = UDim.new(0, 12),
 	}, Page)
 
 	-- Le panneau d'un selecteur ouvert est positionne une fois, en coordonnees
-	-- fenetre : il ne suit pas la page qui defile. Plutot que de le repositionner
-	-- a chaque frame, on referme les listes ouvertes des que la page bouge.
+	-- fenetre : il ne suit pas la page qui defile. On referme donc les listes
+	-- ouvertes des que la page bouge.
 	Page:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
 		if MenuChrome.closeDrops then MenuChrome.closeDrops() end
 	end)
 
 	pages[name] = Page
-	sidebarButtons[name] = { Button = Button, Label = Label, Underline = Underline }
+	sidebarButtons[name] = { Button = Button, Icon = Icon }
 	-- Le contenu s'organise en blocs a deux colonnes (voir addSection) : on suit
-	-- ici, PAR PAGE, le bloc en cours de remplissage (une section pleine largeur
-	-- le referme). Indexe par l'instance Page parce que c'est ce que addSection
-	-- recoit, pas le nom de la categorie.
+	-- ici, PAR PAGE, le bloc en cours de remplissage.
 	MenuChrome.bands[Page] = { block = nil }
 	MenuChrome.rows[Page] = {}
 	MenuChrome.blocks[Page] = {} -- blocs a deux colonnes, reequilibres au premier affichage
 	return Page
 end
 
--- Tooltip generique (survol) : un seul Frame partage plutot qu'un pave de
--- texte fixe sous chaque controle (menu trop charge sinon) - repositionne et
--- rempli au MouseEnter de la cible, cache au MouseLeave. Bascule a gauche du
--- curseur si l'affichage a droite deborderait de l'ecran.
+-- Tooltip generique (survol) : une seule bulle partagee, claire sur fond
+-- sombre (couleurs inversees), repositionnee au MouseEnter de la cible.
+-- Bascule a gauche du curseur si l'affichage a droite deborderait de l'ecran.
 local Tooltip = Skin.paint(create("Frame", {
-	Size = UDim2.new(0, 220, 0, 0),
+	Size = UDim2.new(0, 230, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 0.04,
 	BorderSizePixel = 0,
 	Visible = false,
 	ZIndex = 100,
-}, ScreenGui), { BackgroundColor3 = "Panel" })
-corner(Tooltip, 4)
-Skin.paint(create("UIStroke", { Transparency = 0 }, Tooltip), { Color = "StrokeStrong" })
+}, ScreenGui), { BackgroundColor3 = "Text" })
+Skin.round(Tooltip, 12)
 create("UIPadding", {
-	PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9),
-	PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7),
+	PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+	PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
 }, Tooltip)
 local TooltipLabel = Skin.paint(create("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
 	BackgroundTransparency = 1,
 	Text = "",
-	Font = Enum.Font.Gotham,
+	Font = Enum.Font.GothamMedium,
 	TextSize = 13,
 	TextWrapped = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	ZIndex = 101,
-}, Tooltip), { TextColor3 = "SubText" })
+}, Tooltip), { TextColor3 = "Background" })
 
 -- target : n'importe quel GuiObject (Row/Holder/Button retourne par
 -- addToggleRow/addDropdownRow/addButtonRow/addSliderRow...).
@@ -3131,8 +3242,8 @@ local function attachTooltip(target, text)
 	target.MouseEnter:Connect(function(x, y)
 		TooltipLabel.Text = text
 		local posX = x + 16
-		if posX + 220 > ScreenGui.AbsoluteSize.X then
-			posX = x - 220 - 16
+		if posX + 230 > ScreenGui.AbsoluteSize.X then
+			posX = x - 230 - 16
 		end
 		Tooltip.Position = UDim2.new(0, posX, 0, y - 10)
 		Tooltip.Visible = true
@@ -3142,9 +3253,8 @@ local function attachTooltip(target, text)
 	end)
 end
 
--- Card compacte : titre en petites capitales sous un filet, contenu dessous.
--- Le lisere d'accent plein-hauteur a saute - avec deux cards cote a cote il se
--- repetait trop et devenait du bruit.
+-- Carte de verre : titre en petites capitales, contenu dessous, sans filet.
+-- Fond = voile tres leger (couleur du texte a 5 %) + contour fin, coins 14.
 --
 -- Mise en page en DEUX COLONNES : Roblox n'a pas de grille qui accepte des
 -- enfants a hauteur automatique (UIGridLayout impose une taille de cellule
@@ -3176,7 +3286,7 @@ local function addSection(page, title, wide)
 			}, page)
 			create("UIListLayout", {
 				FillDirection = Enum.FillDirection.Horizontal,
-				Padding = UDim.new(0, 8),
+				Padding = UDim.new(0, 10),
 				VerticalAlignment = Enum.VerticalAlignment.Top,
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}, Block)
@@ -3184,12 +3294,12 @@ local function addSection(page, title, wide)
 			band.block = { frame = Block, cols = {}, cards = {} }
 			for i = 1, 2 do
 				band.block.cols[i] = create("Frame", {
-					Size = UDim2.new(0.5, -4, 0, 0),
+					Size = UDim2.new(0.5, -5, 0, 0),
 					AutomaticSize = Enum.AutomaticSize.Y,
 					BackgroundTransparency = 1,
 					LayoutOrder = i,
 				}, Block)
-				create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, band.block.cols[i])
+				create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, band.block.cols[i])
 			end
 			table.insert(MenuChrome.blocks[page], band.block)
 		end
@@ -3201,12 +3311,12 @@ local function addSection(page, title, wide)
 		host = band.block.cols[1]
 	end
 
-	local Card = Skin.paint(create("Frame", {
+	local Card = Skin.veil(create("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-	}, host), { BackgroundColor3 = "Panel" })
-	corner(Card, 4)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, Card), { Color = "Stroke" })
+	}, host), Skin.A.Card)
+	Skin.round(Card, Skin.R.Card)
+	Skin.edge(Card, 0.93)
 
 	if band and band.block and not wide then
 		table.insert(band.block.cards, Card)
@@ -3219,28 +3329,22 @@ local function addSection(page, title, wide)
 	}, Card)
 	create("UIListLayout", { Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder }, Inner)
 	create("UIPadding", {
-		PaddingTop = UDim.new(0, 9), PaddingBottom = UDim.new(0, 10),
-		PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16),
 	}, Inner)
 
-	-- Casse normale en Gotham, pas des capitales en chasse fixe : "ENVOI AUTO
-	-- INVENTAIRE" faisait log systeme, et les capitales tiennent mal l'accentuation
-	-- francaise. La chasse fixe reste reservee aux valeurs (chiffres, touches).
-	local TitleLabel = Skin.paint(create("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 19),
+	-- Titre en capitales, petit et estompe : il range la carte sans voler
+	-- l'attention aux reglages. La chasse fixe reste reservee aux valeurs.
+	Skin.paint(create("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 16),
 		BackgroundTransparency = 1,
-		Text = title,
+		Text = string.upper(title),
 		Font = Enum.Font.GothamBold,
-		TextSize = 14,
+		TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		LayoutOrder = 0,
 	}, Inner), { TextColor3 = "SubText" })
-
-	Skin.paint(create("Frame", {
-		Size = UDim2.new(1, 0, 0, 1),
-		BorderSizePixel = 0,
-		LayoutOrder = 1,
-	}, Inner), { BackgroundColor3 = "Stroke" })
 
 	local Content = create("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
@@ -3248,8 +3352,8 @@ local function addSection(page, title, wide)
 		BackgroundTransparency = 1,
 		LayoutOrder = 2,
 	}, Inner)
-	create("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, Content)
-	create("UIPadding", { PaddingTop = UDim.new(0, 6) }, Content)
+	create("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, Content)
+	create("UIPadding", { PaddingTop = UDim.new(0, 4) }, Content)
 
 	-- Enregistre la card pour la recherche : chaque ligne creee dedans se
 	-- declare via MenuChrome.track (appele par les add*Row), et la card se
@@ -3313,12 +3417,12 @@ function MenuChrome.balance(page, attempt)
 	-- AbsoluteSize n'est renseignee qu'une fois la fenetre reellement affichee
 	-- et la mise en page calculee. Si on tombe trop tot (menu encore masque par
 	-- la splash de chargement), toutes les hauteurs valent 0 : on retente plutot
-	-- que de repartir n'importe comment, et on abandonne au bout de ~2 s.
+	-- que de repartir n'importe comment, et on abandonne au bout de ~4 s.
 	attempt = (attempt or 0) + 1
 	for _, block in ipairs(blocks) do
 		for _, card in ipairs(block.cards) do
 			if card.AbsoluteSize.Y <= 0 then
-				if attempt < 20 then task.delay(0.1, MenuChrome.balance, page, attempt) end
+				if attempt < 40 then task.delay(0.1, MenuChrome.balance, page, attempt) end
 				return
 			end
 		end
@@ -3332,7 +3436,7 @@ function MenuChrome.balance(page, attempt)
 		if count >= 2 and count <= 16 then
 			local heights = {}
 			for i, card in ipairs(cards) do
-				heights[i] = card.AbsoluteSize.Y + 8 -- + l'ecart entre deux cards
+				heights[i] = card.AbsoluteSize.Y + 10 -- + l'ecart entre deux cards
 			end
 
 			local bestMask, bestScore = 0, math.huge
@@ -3362,16 +3466,15 @@ function MenuChrome.balance(page, attempt)
 end
 
 -- Hauteur commune a toutes les lignes de reglage : ce qui donne son rythme
--- vertical a la page. 32 px au lieu de 38 - assez pour respirer avec du texte
--- a 14, tout en restant plus dense qu'avant.
-local ROW_H = 34
+-- vertical a la page. 42 px : le design "Verre" respire plus que l'ancien.
+local ROW_H = 42
 
 local function addToggleRow(content, text, default, onChange)
 	local state = default or false
 
 	local Row = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, ROW_H), BackgroundTransparency = 1 }, content), text)
 	local Label = Skin.paint(create("TextLabel", {
-		Size = UDim2.new(1, -46, 1, 0),
+		Size = UDim2.new(1, -58, 1, 0),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
@@ -3380,38 +3483,46 @@ local function addToggleRow(content, text, default, onChange)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, Row), { TextColor3 = "Text" })
 
-	local ON_POSITION, OFF_POSITION = UDim2.new(1, -17, 0.5, -7), UDim2.new(0, 3, 0.5, -7)
+	-- Interrupteur pilule 46x26 : accent quand actif, voile quand eteint,
+	-- pastille blanche de 20 px qui glisse.
+	local ON_POSITION, OFF_POSITION = UDim2.new(1, -23, 0.5, -10), UDim2.new(0, 3, 0.5, -10)
 
 	local Switch = Skin.paint(create("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, 36, 0, 20),
-	}, Row), { BackgroundColor3 = state and "Accent" or "StrokeStrong" })
-	corner(Switch, 10)
+		Size = UDim2.new(0, 46, 0, 26),
+		BackgroundTransparency = state and 0 or 0.86,
+		BorderSizePixel = 0,
+	}, Row), { BackgroundColor3 = state and "Accent" or "Text" })
+	Skin.round(Switch)
 
-	local Knob = Skin.paint(create("Frame", {
-		Size = UDim2.new(0, 14, 0, 14),
+	local Knob = create("Frame", {
+		Size = UDim2.new(0, 20, 0, 20),
 		Position = state and ON_POSITION or OFF_POSITION,
-	}, Switch), { BackgroundColor3 = state and "OnAccent" or "SubText" })
-	corner(Knob, 7)
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+	}, Switch)
+	Skin.round(Knob)
 
-	local Click = create("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "" }, Switch)
+	-- Toute la ligne est cliquable (pas seulement l'interrupteur), comme dans
+	-- la maquette. Pose sous les autres enfants : le petit carre de keybind
+	-- (KeybindTool.bindToggle), cree apres, reste au-dessus et garde son clic.
+	local Click = create("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", ZIndex = 0 }, Row)
 
 	local function set(newState)
 		state = newState
-		-- Reecrit l'entree de registre plutot que la couleur seule : sans ca un
+		-- Skin.shift reecrit l'entree de registre en plus d'animer : sans ca un
 		-- changement de theme repeindrait le switch avec le jeton d'origine
 		-- (celui capture a la creation) et perdrait l'etat courant.
-		Skin.paint(Switch, { BackgroundColor3 = state and "Accent" or "StrokeStrong" })
-		Skin.paint(Knob, { BackgroundColor3 = state and "OnAccent" or "SubText" })
-		tweenStyled(Knob, { Position = state and ON_POSITION or OFF_POSITION }, 0.2)
+		Skin.shift(Switch, { BackgroundColor3 = state and "Accent" or "Text" }, { BackgroundTransparency = state and 0 or 0.86 })
+		Skin.ease(Knob, { Position = state and ON_POSITION or OFF_POSITION }, 0.25, Enum.EasingStyle.Back)
 		if onChange then onChange(state) end
 	end
 	Click.MouseButton1Click:Connect(function() set(not state) end)
 
-	-- Row/Label exposes : utilises par KeybindTool pour inserer le petit carre
-	-- de rebind a gauche du texte, sans que les toggles sans keybind n'aient a
-	-- en payer le cout visuel.
+	-- Row/Label exposes : utilises par KeybindTool pour inserer la petite
+	-- pastille de touche a cote du texte, sans que les toggles sans keybind
+	-- n'aient a en payer le cout visuel.
 	return { Set = set, Get = function() return state end, Row = Row, Label = Label }
 end
 
@@ -3432,18 +3543,28 @@ end
 -- constantes a plat en consommaient six.
 local DROP = {
 	H = ROW_H,          -- hauteur de l'en-tete, alignee sur une ligne normale
-	OPT = 29,           -- hauteur d'une option
+	OPT = 32,           -- hauteur d'une option
+	GAP = 2,            -- ecart entre deux options
+	PAD = 6,            -- marge interieure du panneau
 	MAX = 9,            -- options visibles avant defilement
-	BOX = 160,          -- largeur de la boite de valeur, a droite
+	BOX = 170,          -- largeur de la pilule de valeur, a droite
 	SEARCH_FROM = 8,    -- a partir de combien d'options on ajoute une recherche
-	SEARCH_H = 28,
+	SEARCH_H = 38,      -- champ de recherche (32) + son ecart avec la liste
 }
 
+-- Etat visuel d'une option : choisie = fond teinte accent + texte accent.
+-- L'attribut "Picked" sert au survol, pour ne pas effacer ce fond.
+function DROP.mark(button, picked)
+	button:SetAttribute("Picked", picked)
+	Skin.shift(button, {
+		BackgroundColor3 = picked and "Accent" or "Text",
+		TextColor3 = picked and "Accent" or "Text",
+	}, { BackgroundTransparency = picked and Skin.A.Tint or 1 }, 0.12)
+end
+
 -- En-tete commun, construit comme les autres lignes : libelle nu a gauche
--- (meme couleur, meme taille qu'un toggle), et une boite compacte a droite
--- avec la valeur et le chevron. Avant, tout l'en-tete etait une grosse boite
--- pleine largeur : le selecteur ressortait comme un corps etranger au milieu
--- de lignes nues. Renvoie Holder, bouton, label de valeur et chevron.
+-- (meme couleur, meme taille qu'un toggle), et une pilule a droite avec la
+-- valeur et le chevron. Renvoie Holder, bouton, label de valeur et chevron.
 local function buildDropHead(content, text, valueText)
 	local Holder = create("Frame", {
 		Size = UDim2.new(1, 0, 0, DROP.H),
@@ -3467,82 +3588,67 @@ local function buildDropHead(content, text, valueText)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, MainButton), { TextColor3 = "Text" })
 
-	local Box = Skin.paint(create("Frame", {
+	local Box = Skin.veil(create("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, DROP.BOX, 0, 26),
-	}, MainButton), { BackgroundColor3 = "Element" })
-	corner(Box, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, Box), { Color = "StrokeStrong" })
+		Size = UDim2.new(0, DROP.BOX, 0, 34),
+	}, MainButton), Skin.A.Track)
+	Skin.round(Box)
 
 	local ValueLabel = Skin.paint(create("TextLabel", {
-		Position = UDim2.new(0, 8, 0, 0),
-		Size = UDim2.new(1, -26, 1, 0),
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.new(1, -40, 1, 0),
 		BackgroundTransparency = 1,
 		Text = valueText,
-		Font = Enum.Font.Code,
-		TextSize = 13,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, Box), { TextColor3 = "Text" })
 
-	local Chevron = Skin.paint(create("TextLabel", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -6, 0.5, 0),
-		Size = UDim2.new(0, 12, 0, 12),
-		BackgroundTransparency = 1,
-		Text = "▾",
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, Box), { TextColor3 = "SubText" })
+	-- Chevron dessine (Skin.ICONS) : pivote de 180 degres a l'ouverture.
+	local Chevron = Skin.icon("Chevron", Box, "SubText", 14)
+	Chevron.Position = UDim2.new(1, -20, 0.5, 0)
 
-	MainButton.MouseEnter:Connect(function() tween(Box, { BackgroundColor3 = Theme.ElementHover }, 0.1) end)
-	MainButton.MouseLeave:Connect(function() tween(Box, { BackgroundColor3 = Theme.Element }, 0.1) end)
+	MainButton.MouseEnter:Connect(function() Skin.ease(Box, { BackgroundTransparency = Skin.A.Hover }, 0.12) end)
+	MainButton.MouseLeave:Connect(function() Skin.ease(Box, { BackgroundTransparency = Skin.A.Track }, 0.12) end)
 
 	return Holder, MainButton, ValueLabel, Chevron
 end
 
 -- Option de liste, commune aux deux selecteurs. `label` est deja mis en forme
--- par l'appelant (le multi-select y prefixe sa case "[x] " / "[  ] ").
+-- par l'appelant.
 local function buildDropOption(list, label)
-	-- ZIndex explicite (et pas la valeur par defaut) : le ScreenGui est cree par
-	-- Instance.new, donc son ZIndexBehavior vaut Global - le rendu suit le
-	-- numero de ZIndex a plat sur tout l'arbre, PAS la hierarchie. Sans ca, le
-	-- fond du panneau (12) recouvrait ses propres options (1) : la liste
-	-- s'ouvrait et restait cliquable, mais paraissait vide.
 	local OptButton = Skin.paint(create("TextButton", {
 		Size = UDim2.new(1, 0, 0, DROP.OPT),
 		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
 		Text = label,
 		Font = Enum.Font.GothamMedium,
 		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		ZIndex = 14,
-	}, list), { BackgroundColor3 = "ElementHover", TextColor3 = "SubText" })
-	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, OptButton)
-	OptButton.MouseEnter:Connect(function() OptButton.BackgroundTransparency = 0 end)
-	OptButton.MouseLeave:Connect(function() OptButton.BackgroundTransparency = 1 end)
+		AutoButtonColor = false,
+	}, list), { BackgroundColor3 = "Text", TextColor3 = "Text" })
+	Skin.round(OptButton, 9)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, OptButton)
+	OptButton.MouseEnter:Connect(function()
+		if not OptButton:GetAttribute("Picked") then Skin.ease(OptButton, { BackgroundTransparency = 0.92 }, 0.1) end
+	end)
+	OptButton.MouseLeave:Connect(function()
+		if not OptButton:GetAttribute("Picked") then Skin.ease(OptButton, { BackgroundTransparency = 1 }, 0.1) end
+	end)
 	return OptButton
 end
 
 -- Panneau de liste FLOTTANT, parente a Main (la fenetre) et PAS a la card ni a
 -- PagesHolder : il passe ainsi par-dessus le contenu au lieu de le pousser, et
--- surtout il echappe au ClipsDescendants de la zone de contenu. Parente a
--- PagesHolder, une liste ouverte pres du bas de page etait tout simplement
--- coupee - on ne voyait que les deux premieres options du selecteur "Boss".
--- Main n'a pas de ClipsDescendants : le panneau peut donc deborder de la
--- fenetre si besoin, ce qui vaut mieux que d'etre tronque.
+-- echappe au decoupage des pages (ScrollingFrame). Position calculee a la main
+-- a l'ouverture, en coordonnees Main.
 --
--- Position calculee a la main a l'ouverture, en coordonnees Main.
---
--- ZIndex : le ScreenGui vient d'Instance.new, donc son ZIndexBehavior vaut
--- Global - tout est dessine selon le numero de ZIndex a plat sur l'arbre, sans
--- tenir compte de la hierarchie. Un enfant ne passe donc PAS automatiquement
--- au-dessus de son parent : il faut etager explicitement (panneau 12, barre de
--- recherche et liste 13, options 14). Le contenu du menu plafonne a 10
--- (poignee de redimensionnement) et les voiles de chargement commencent a 20,
--- d'ou cette plage.
+-- ZIndex 12 : le panneau est un enfant direct de Main, il passe donc devant
+-- les pages et l'en-tete (ZIndexBehavior Sibling, voir la creation du
+-- ScreenGui). Ses propres enfants suivent naturellement au-dessus de lui.
 -- Renvoie { Panel, Scroll, Search, Open, Close, IsOpen }.
 --
 -- Une barre de recherche apparait a partir de DROP.SEARCH_FROM options : c'est
@@ -3552,18 +3658,30 @@ local function buildDropList(holder, optionCount)
 	local withSearch = optionCount >= DROP.SEARCH_FROM
 	local searchOffset = withSearch and DROP.SEARCH_H or 0
 
+	-- Fond presque opaque (contrairement au verre de la fenetre) : la liste
+	-- passe par-dessus d'autres reglages, qui ne doivent pas se lire au travers.
 	local Panel = Skin.paint(create("Frame", {
 		Visible = false,
+		BackgroundTransparency = 0.04,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
 		ZIndex = 12,
-	}, Main), { BackgroundColor3 = "Element" })
-	corner(Panel, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, Panel), { Color = "StrokeStrong" })
+	}, Main), { BackgroundColor3 = "Panel" })
+	Skin.round(Panel, Skin.R.Card)
+	Skin.edge(Panel, 0.86)
 
 	local Search
 	if withSearch then
+		local field = Skin.veil(create("Frame", {
+			Position = UDim2.fromOffset(DROP.PAD, DROP.PAD),
+			Size = UDim2.new(1, -DROP.PAD * 2, 0, DROP.SEARCH_H - 6),
+		}, Panel), 0.93)
+		Skin.round(field, 10)
+		local icon = Skin.icon("Recherche", field, "SubText", 14)
+		icon.Position = UDim2.new(0, 18, 0.5, 0)
 		Search = Skin.paint(create("TextBox", {
-			Position = UDim2.new(0, 1, 0, 1),
-			Size = UDim2.new(1, -2, 0, DROP.SEARCH_H - 2),
+			Position = UDim2.fromOffset(32, 0),
+			Size = UDim2.new(1, -40, 1, 0),
 			BackgroundTransparency = 1,
 			Text = "",
 			PlaceholderText = "Rechercher...",
@@ -3571,28 +3689,20 @@ local function buildDropList(holder, optionCount)
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ClearTextOnFocus = false,
-			ZIndex = 13,
-		}, Panel), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
-		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, Search)
-		Skin.paint(create("Frame", {
-			Position = UDim2.new(0, 0, 0, DROP.SEARCH_H - 1),
-			Size = UDim2.new(1, 0, 0, 1),
-			BorderSizePixel = 0,
-			ZIndex = 13,
-		}, Panel), { BackgroundColor3 = "StrokeStrong" })
+		}, field), { TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
 	end
 
 	local Scroll = Skin.paint(create("ScrollingFrame", {
-		Position = UDim2.new(0, 0, 0, searchOffset),
-		Size = UDim2.new(1, 0, 1, -searchOffset),
+		Position = UDim2.fromOffset(DROP.PAD, DROP.PAD + searchOffset),
+		Size = UDim2.new(1, -DROP.PAD * 2, 0, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 3,
+		ScrollBarImageTransparency = 0.5,
 		CanvasSize = UDim2.new(0, 0, 0, 0),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ZIndex = 13,
-	}, Panel), { ScrollBarImageColor3 = "StrokeStrong" })
-	create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, Scroll)
+	}, Panel), { ScrollBarImageColor3 = "Text" })
+	create("UIListLayout", { Padding = UDim.new(0, DROP.GAP), SortOrder = Enum.SortOrder.LayoutOrder }, Scroll)
 
 	local api = { Panel = Panel, Scroll = Scroll, Search = Search }
 
@@ -3605,20 +3715,30 @@ local function buildDropList(holder, optionCount)
 	-- pas une hauteur fixe quand la recherche en masque la moitie.
 	function api.Open(visibleCount)
 		local rows = math.clamp(visibleCount or optionCount, 1, DROP.MAX)
-		local height = searchOffset + rows * DROP.OPT
+		local listHeight = rows * DROP.OPT + (rows - 1) * DROP.GAP
+		local height = DROP.PAD * 2 + searchOffset + listHeight
+		-- Main porte un UIScale (animation d'ouverture) : on ramene les
+		-- positions ecran a l'echelle 1 de la fenetre.
+		local k = MenuChrome.Scale.Scale
 		local origin = Main.AbsolutePosition
 		local anchor = holder.AbsolutePosition
 
 		-- Sous l'en-tete par defaut ; au-dessus si la liste depasserait le bas de
-		-- l'ecran (typiquement un selecteur en bas d'une page bien remplie).
-		local top = anchor.Y + DROP.H
-		if top + height > ScreenGui.AbsoluteSize.Y - 8 then
-			top = anchor.Y - height
-		end
+		-- l'ecran (typiquement un selecteur en bas d'une page bien remplie). Le
+		-- panneau "pousse" depuis le bord colle a l'en-tete dans les deux cas.
+		local below = anchor.Y + (DROP.H - 2) * k + height * k <= ScreenGui.AbsoluteSize.Y - 8
+		local x = (anchor.X - origin.X) / k
+		local y = below and ((anchor.Y - origin.Y) / k + DROP.H - 2) or ((anchor.Y - origin.Y) / k + 2)
+		local width = holder.AbsoluteSize.X / k
 
-		Panel.Position = UDim2.fromOffset(anchor.X - origin.X, top - origin.Y)
-		Panel.Size = UDim2.fromOffset(holder.AbsoluteSize.X, height)
-		Panel.Visible = true
+		Scroll.Size = UDim2.new(1, -DROP.PAD * 2, 0, listHeight)
+		Panel.AnchorPoint = Vector2.new(0, below and 0 or 1)
+		Panel.Position = UDim2.fromOffset(x, y)
+		if not Panel.Visible then
+			Panel.Size = UDim2.fromOffset(width, math.floor(height * 0.6))
+			Panel.Visible = true
+		end
+		Skin.ease(Panel, { Size = UDim2.fromOffset(width, height) }, 0.2)
 	end
 
 	function api.IsOpen() return Panel.Visible end
@@ -3681,12 +3801,12 @@ local function addDropdownRow(content, text, options, default, onChange, dynamic
 		for _, option in ipairs(list) do
 			local OptButton = buildDropOption(drop.Scroll, tostring(option))
 			table.insert(buttons, OptButton)
-			if option == selected then Skin.paint(OptButton, { TextColor3 = "Accent" }) end
+			if option == selected then DROP.mark(OptButton, true) end
 			OptButton.MouseButton1Click:Connect(function()
 				selected = option
 				ValueLabel.Text = tostring(selected)
 				for _, other in ipairs(buttons) do
-					Skin.paint(other, { TextColor3 = other == OptButton and "Accent" or "SubText" })
+					DROP.mark(other, other == OptButton)
 				end
 				close()
 				if onChange then onChange(selected) end
@@ -3757,8 +3877,12 @@ local function addMultiSelectDropdownRow(content, text, options, selectedSet, on
 	local drop = buildDropList(Holder, #options)
 	local buttons = {}
 
-	local function optionText(option)
-		return (selectedSet[option] and "[x]  " or "[  ]  ") .. tostring(option)
+	-- Case a cocher dessinee a gauche de l'option (carre arrondi + coche) :
+	-- remplace l'ancien prefixe texte "[x] ". Le texte reste le nom seul, ce
+	-- qui garde la recherche du panneau inchangee.
+	local function paintBox(box, check, on, animated)
+		Skin.shift(box, { BackgroundColor3 = on and "Accent" or "Text" }, { BackgroundTransparency = on and 0 or 0.86 }, animated and 0.12 or 0)
+		Skin.ease(check, { Size = on and UDim2.fromOffset(12, 12) or UDim2.fromOffset(0, 0) }, animated and 0.18 or 0, Enum.EasingStyle.Back)
 	end
 
 	local function visibleCount()
@@ -3778,18 +3902,28 @@ local function addMultiSelectDropdownRow(content, text, options, selectedSet, on
 	end
 
 	for _, option in ipairs(options) do
-		local OptButton = buildDropOption(drop.Scroll, optionText(option))
-		OptButton.Font = Enum.Font.Code
-		OptButton.TextSize = 13
+		local OptButton = buildDropOption(drop.Scroll, tostring(option))
+		OptButton:FindFirstChildWhichIsA("UIPadding").PaddingLeft = UDim.new(0, 38)
+		local box = create("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, -28, 0.5, 0),
+			Size = UDim2.fromOffset(18, 18),
+			BorderSizePixel = 0,
+		}, OptButton)
+		Skin.round(box, 6)
+		local check = Skin.icon("Coche", box, "OnAccent", 12)
+		check.Size = UDim2.fromOffset(0, 0)
+		check.ClipsDescendants = true
 		table.insert(buttons, OptButton)
+		paintBox(box, check, selectedSet[option], false)
 		if selectedSet[option] then Skin.paint(OptButton, { TextColor3 = "Accent" }) end
 
 		-- Ne se ferme PAS au clic : on coche plusieurs entrees d'affilee.
 		OptButton.MouseButton1Click:Connect(function()
 			local newState = not selectedSet[option]
 			selectedSet[option] = newState
-			OptButton.Text = optionText(option)
-			Skin.paint(OptButton, { TextColor3 = newState and "Accent" or "SubText" })
+			paintBox(box, check, newState, true)
+			Skin.shift(OptButton, { TextColor3 = newState and "Accent" or "Text" }, nil, 0.12)
 			ValueLabel.Text = headText()
 			if onChange then onChange(option, newState) end
 		end)
@@ -3818,11 +3952,12 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 	step = step or 1
 	local value = default or min
 
-	-- Tout tient sur UNE ligne (libelle / valeur / piste) au lieu des deux
-	-- d'avant : c'est l'autre moitie du gain de densite.
-	local Holder = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, ROW_H), BackgroundTransparency = 1 }, content), text)
+	-- Deux etages : libelle + pastille de valeur en haut, piste pleine largeur
+	-- dessous. La piste longue rend le reglage fin bien plus facile.
+	local Holder = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1 }, content), text)
 	Skin.paint(create("TextLabel", {
-		Size = UDim2.new(1, -178, 1, 0),
+		Position = UDim2.fromOffset(0, 6),
+		Size = UDim2.new(1, -90, 0, 22),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
@@ -3837,39 +3972,50 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 		return string.format("%." .. decimals .. "f", v)
 	end
 
-	-- Chasse fixe : la valeur ne fait pas sauter la piste en changeant de
-	-- largeur quand elle passe de 9 a 10.
-	local ValueLabel = Skin.paint(create("TextLabel", {
+	-- Chasse fixe : la valeur ne change pas de largeur en passant de 9 a 10.
+	local ValueLabel = Skin.veil(create("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -110, 0, 0),
-		Size = UDim2.new(0, 62, 1, 0),
-		BackgroundTransparency = 1,
+		Position = UDim2.new(1, 0, 0, 5),
+		Size = UDim2.fromOffset(0, 24),
+		AutomaticSize = Enum.AutomaticSize.X,
 		Text = formatValue(value),
 		Font = Enum.Font.Code,
 		TextSize = 13,
-		TextXAlignment = Enum.TextXAlignment.Right,
-	}, Holder), { TextColor3 = "SubText" })
+	}, Holder), 0.92)
+	Skin.paint(ValueLabel, { TextColor3 = "Text" })
+	Skin.round(ValueLabel, 8)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, ValueLabel)
 
-	local Bar = Skin.paint(create("Frame", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, 100, 0, 4),
-	}, Holder), { BackgroundColor3 = "StrokeStrong" })
-	corner(Bar, 2)
+	local Bar = Skin.veil(create("Frame", {
+		Position = UDim2.new(0, 0, 0, 40),
+		Size = UDim2.new(1, 0, 0, 8),
+	}, Holder), Skin.A.Track)
+	Skin.round(Bar)
 
 	local function pctFor(v) return (v - min) / (max - min) end
 
-	local Fill = Skin.paint(create("Frame", { Size = UDim2.new(pctFor(value), 0, 1, 0) }, Bar), { BackgroundColor3 = "Accent" })
-	corner(Fill, 2)
+	local Fill = Skin.paint(create("Frame", { Size = UDim2.new(pctFor(value), 0, 1, 0), BorderSizePixel = 0 }, Bar), { BackgroundColor3 = "Accent" })
+	Skin.round(Fill)
 
-	-- Curseur : un trait vertical fin plutot qu'une pastille ronde - a cette
-	-- taille de piste (3 px) une pastille ferait une grosse bulle posee dessus.
-	local Knob = Skin.paint(create("Frame", {
+	-- Pastille blanche ; pendant le glisser elle grossit et prend un halo accent.
+	local Knob = create("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(pctFor(value), 0, 0.5, 0),
-		Size = UDim2.new(0, 4, 0, 15),
-		ZIndex = 2,
-	}, Bar), { BackgroundColor3 = "Accent" })
+		Size = UDim2.fromOffset(18, 18),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+	}, Bar)
+	Skin.round(Knob)
+	local halo = Skin.paint(create("UIStroke", { Thickness = 5, Transparency = 1 }, Knob), { Color = "Accent" })
+
+	-- Zone de clic plus haute que la piste (8 px, trop fine a viser).
+	local Hit = create("TextButton", {
+		Position = UDim2.new(0, -6, 0, 30),
+		Size = UDim2.new(1, 12, 0, 28),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+	}, Holder)
 
 	local dragging = false
 
@@ -3884,23 +4030,28 @@ local function addSliderRow(content, text, min, max, default, step, onChange)
 		if onChange then onChange(value) end
 	end
 
-	local function setKnobHover(hovering)
-		tweenStyled(Knob, { Size = hovering and UDim2.new(0, 4, 0, 19) or UDim2.new(0, 4, 0, 15) }, 0.15)
+	local function setKnobState(hovering, active)
+		Skin.ease(Knob, { Size = (hovering or active) and UDim2.fromOffset(22, 22) or UDim2.fromOffset(18, 18) }, 0.18, Enum.EasingStyle.Back)
+		Skin.ease(halo, { Transparency = active and 0.7 or 1 }, 0.15)
+		Skin.shift(ValueLabel, {
+			BackgroundColor3 = active and "Accent" or "Text",
+			TextColor3 = active and "OnAccent" or "Text",
+		}, { BackgroundTransparency = active and 0 or 0.92 }, 0.15)
 	end
-	Bar.MouseEnter:Connect(function() setKnobHover(true) end)
-	Bar.MouseLeave:Connect(function() if not dragging then setKnobHover(false) end end)
+	Hit.MouseEnter:Connect(function() if not dragging then setKnobState(true, false) end end)
+	Hit.MouseLeave:Connect(function() if not dragging then setKnobState(false, false) end end)
 
-	Bar.InputBegan:Connect(function(input)
+	Hit.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
-			setKnobHover(true)
+			setKnobState(true, true)
 			apply(input.Position.X)
 		end
 	end)
 	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 			dragging = false
-			setKnobHover(false)
+			setKnobState(false, false)
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(input)
@@ -3948,27 +4099,34 @@ end
 -- Retour arriere/Suppr) puisque ces touches supportent l'etat "aucune".
 local function attachKeybindCapture(button, currentKey, onChange, escapeClears)
 	local capturing = false
-	local function labelFor(k) return k and k.Name or "Aucune" end
+	-- Texte quand aucune touche : "Aucune" par defaut, "+" sur la petite
+	-- pastille des toggles (attribut EmptyText pose par KeybindTool).
+	local function labelFor(k) return k and k.Name or (button:GetAttribute("EmptyText") or "Aucune") end
 	button.Text = labelFor(currentKey)
 
+	-- Etat de repos lu sur le bouton lui-meme : la meme fonction sert a la
+	-- pilule de la ligne complete et a la petite pastille, qui n'ont pas le
+	-- meme fond.
+	local restT = button.BackgroundTransparency
+	local captureStroke = button:FindFirstChildWhichIsA("UIStroke")
+	local strokeT = captureStroke and captureStroke.Transparency or 1
+
 	button.MouseEnter:Connect(function()
-		if not capturing then tween(button, { BackgroundColor3 = Theme.ElementHover }, 0.1) end
+		if not capturing then Skin.ease(button, { BackgroundTransparency = math.max(0, restT - 0.08) }, 0.12) end
 	end)
 	button.MouseLeave:Connect(function()
-		if not capturing then tween(button, { BackgroundColor3 = Theme.Element }, 0.1) end
+		if not capturing then Skin.ease(button, { BackgroundTransparency = restT }, 0.12) end
 	end)
 
-	-- Pendant l'ecoute, le cadre passe en Warn (ambre dans tous les themes) :
-	-- ca dit "le menu attend une touche" sans se confondre avec l'accent, qui
-	-- veut deja dire "actif" partout ailleurs.
+	-- Pendant l'ecoute, la pilule passe a l'accent (fond teinte, texte et
+	-- contour) avec "..." : ca dit "le menu attend une touche".
 	button.MouseButton1Click:Connect(function()
 		if capturing then return end
 		capturing = true
 		capturingKeybind = true
 		button.Text = "..."
-		tween(button, { TextColor3 = Theme.Warn }, 0.1)
-		local captureStroke = button:FindFirstChildWhichIsA("UIStroke")
-		if captureStroke then captureStroke.Color = Theme.Warn end
+		Skin.shift(button, { BackgroundColor3 = "Accent", TextColor3 = "Accent" }, { BackgroundTransparency = Skin.A.Tint }, 0.12)
+		if captureStroke then Skin.shift(captureStroke, { Color = "Accent" }, { Transparency = 0.3 }, 0.12) end
 
 		local connection
 		connection = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -3978,8 +4136,8 @@ local function attachKeybindCapture(button, currentKey, onChange, escapeClears)
 			connection:Disconnect()
 			capturing = false
 			capturingKeybind = false
-			tween(button, { BackgroundColor3 = Theme.Element, TextColor3 = Theme.Text }, 0.1)
-			if captureStroke then captureStroke.Color = Theme.StrokeStrong end
+			Skin.shift(button, { BackgroundColor3 = "Text", TextColor3 = "Text" }, { BackgroundTransparency = restT }, 0.15)
+			if captureStroke then Skin.shift(captureStroke, { Color = "Text" }, { Transparency = strokeT }, 0.15) end
 
 			if input.KeyCode == Enum.KeyCode.Escape and not escapeClears then
 				button.Text = labelFor(currentKey)
@@ -4002,7 +4160,7 @@ end
 local function addKeybindRow(content, text, currentKey, onChange, escapeClears)
 	local Row = MenuChrome.track(create("Frame", { Size = UDim2.new(1, 0, 0, ROW_H), BackgroundTransparency = 1 }, content), text)
 	Skin.paint(create("TextLabel", {
-		Size = UDim2.new(1, -104, 1, 0),
+		Size = UDim2.new(1, -120, 1, 0),
 		BackgroundTransparency = 1,
 		Text = text,
 		Font = Enum.Font.GothamMedium,
@@ -4011,16 +4169,20 @@ local function addKeybindRow(content, text, currentKey, onChange, escapeClears)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, Row), { TextColor3 = "Text" })
 
-	local KeyButton = Skin.paint(create("TextButton", {
+	-- Pilule de touche : largeur automatique (RightShift comme F), chasse fixe.
+	local KeyButton = Skin.veil(create("TextButton", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0, 102, 0, 25),
+		Size = UDim2.fromOffset(64, 30),
+		AutomaticSize = Enum.AutomaticSize.X,
 		Font = Enum.Font.Code,
 		TextSize = 13,
 		AutoButtonColor = false,
-	}, Row), { BackgroundColor3 = "Element", TextColor3 = "Text" })
-	corner(KeyButton, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, KeyButton), { Color = "StrokeStrong" })
+	}, Row), Skin.A.Track)
+	Skin.paint(KeyButton, { TextColor3 = "Text" })
+	Skin.round(KeyButton, Skin.R.Element)
+	Skin.edge(KeyButton, 0.9)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, KeyButton)
 
 	return attachKeybindCapture(KeyButton, currentKey, onChange, escapeClears or false)
 end
@@ -4077,31 +4239,36 @@ do
 
 	-- Toggle FEATURE_CONTROLS (control.Get/control.Set) : la touche inverse
 	-- l'etat, exactement comme un clic sur le switch. Pas de ligne separee -
-	-- juste un petit carre insere a gauche du texte du toggle (control.Row/
-	-- control.Label, exposes par addToggleRow), pour rester compact.
+	-- juste une petite pastille de touche entre le texte et l'interrupteur
+	-- (control.Row/control.Label, exposes par addToggleRow), pour rester compact.
 	function KeybindTool.bindToggle(id, label, control)
 		registerEntry(id, label, control.Get, function()
 			control.Set(not control.Get())
 		end, function(key, onChange)
-			local SQUARE = 18
-			local GAP = 6
-
-			control.Label.Position = UDim2.new(0, SQUARE + GAP, 0, 0)
-			control.Label.Size = UDim2.new(1, -38 - SQUARE - GAP, 1, 0)
-
-			local KeySquare = Skin.paint(create("TextButton", {
-				Position = UDim2.new(0, 0, 0.5, -SQUARE / 2),
-				Size = UDim2.new(0, SQUARE, 0, SQUARE),
+			local KeyChip = Skin.veil(create("TextButton", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -56, 0.5, 0),
+				Size = UDim2.fromOffset(30, 24),
+				AutomaticSize = Enum.AutomaticSize.X,
 				Font = Enum.Font.Code,
-				TextSize = 10,
-				TextScaled = true,
-				TextWrapped = true,
+				TextSize = 11,
 				AutoButtonColor = false,
-			}, control.Row), { BackgroundColor3 = "Element", TextColor3 = "SubText" })
-			corner(KeySquare, 3)
-			Skin.paint(create("UIStroke", { Transparency = 0 }, KeySquare), { Color = "StrokeStrong" })
+			}, control.Row), 0.9)
+			Skin.paint(KeyChip, { TextColor3 = "Text" })
+			Skin.round(KeyChip, 7)
+			create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, KeyChip)
+			KeyChip:SetAttribute("EmptyText", "+")
 
-			attachKeybindCapture(KeySquare, key, onChange, true)
+			-- Le libelle laisse la place a la pastille, dont la largeur suit la
+			-- touche affichee (F ou RightShift).
+			local function fitLabel()
+				local width = KeyChip.AbsoluteSize.X / math.max(MenuChrome.Scale.Scale, 0.01)
+				control.Label.Size = UDim2.new(1, -(56 + math.max(width, 30) + 10), 1, 0)
+			end
+			KeyChip:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitLabel)
+			fitLabel()
+
+			attachKeybindCapture(KeyChip, key, onChange, true)
 		end)
 	end
 
@@ -4117,34 +4284,97 @@ do
 
 	-- HUD : liste des touches assignees, superposee au jeu (independante de la
 	-- fenetre du menu). Ne montre que les entries avec une touche assignee.
+	-- Panneau de verre en haut a gauche ; chaque ligne = pastille de touche,
+	-- nom, et ON/OFF pour les features a etat. Actif = pastille accent.
 	KeybindTool.hudFrame = create("Frame", {
 		Position = UDim2.new(0, 16, 0, 60),
-		Size = UDim2.new(0, 220, 0, 0),
+		Size = UDim2.new(0, 210, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 1,
 		Visible = Prefs.ShowKeybindHud,
 	}, ScreenGui)
-	create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, KeybindTool.hudFrame)
+	Skin.glass(KeybindTool.hudFrame, Skin.R.Card, 0.2)
+	KeybindTool.hudStroke = KeybindTool.hudFrame:FindFirstChildWhichIsA("UIStroke")
+	KeybindTool.hudList = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, KeybindTool.hudFrame)
+	create("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, KeybindTool.hudList)
+
+	-- Applique l'etat actif/inactif d'une ligne (seulement quand il change).
+	function KeybindTool.paintHudRow(row, active)
+		if row.active == active then return end
+		row.active = active
+		Skin.shift(row.chip, {
+			BackgroundColor3 = active and "Accent" or "Text",
+			TextColor3 = active and "OnAccent" or "Text",
+		}, { BackgroundTransparency = active and 0 or 0.86 }, 0.15)
+		if row.state then
+			row.state.Text = active and "ON" or "OFF"
+			Skin.shift(row.state, { TextColor3 = active and "Accent" or "SubTextDim" }, nil, 0.15)
+		end
+	end
 
 	function KeybindTool.refreshHud()
-		KeybindTool.hudFrame:ClearAllChildren()
-		create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, KeybindTool.hudFrame)
+		KeybindTool.hudList:ClearAllChildren()
+		create("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, KeybindTool.hudList)
 		KeybindTool.hudRows = {}
-		for _, entry in ipairs(KeybindTool.entries) do
+		local count = 0
+		for index, entry in ipairs(KeybindTool.entries) do
 			if entry.key then
-				KeybindTool.hudRows[entry] = create("TextLabel", {
-					Size = UDim2.new(1, 0, 0, 18),
-					AutomaticSize = Enum.AutomaticSize.Y,
+				count = count + 1
+				local line = create("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, LayoutOrder = index }, KeybindTool.hudList)
+				local chip = Skin.veil(create("TextLabel", {
+					AnchorPoint = Vector2.new(0, 0.5),
+					Position = UDim2.new(0, 0, 0.5, 0),
+					Size = UDim2.fromOffset(26, 22),
+					AutomaticSize = Enum.AutomaticSize.X,
+					Text = entry.key.Name,
+					Font = Enum.Font.Code,
+					TextSize = 11,
+				}, line), 0.86)
+				Skin.paint(chip, { TextColor3 = "Text" })
+				Skin.round(chip, 7)
+				create("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7) }, chip)
+				local name = Skin.paint(create("TextLabel", {
+					Position = UDim2.fromOffset(34, 0),
+					Size = UDim2.new(1, -(34 + (entry.get and 40 or 0)), 1, 0),
 					BackgroundTransparency = 1,
-					Text = "[" .. entry.key.Name .. "] " .. entry.label,
-					Font = Enum.Font.GothamBold,
-					TextSize = 14,
-					TextColor3 = Color3.new(1, 1, 1),
-					TextStrokeTransparency = 0.5,
+					Text = entry.label,
+					Font = Enum.Font.GothamMedium,
+					TextSize = 13,
 					TextXAlignment = Enum.TextXAlignment.Left,
-				}, KeybindTool.hudFrame)
+					TextTruncate = Enum.TextTruncate.AtEnd,
+				}, line), { TextColor3 = "Text" })
+				-- Le nom demarre apres la pastille, quelle que soit sa largeur.
+				chip:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+					name.Position = UDim2.fromOffset(chip.AbsoluteSize.X + 8, 0)
+					name.Size = UDim2.new(1, -(chip.AbsoluteSize.X + 8 + (entry.get and 40 or 0)), 1, 0)
+				end)
+				local stateLabel
+				if entry.get then
+					stateLabel = Skin.paint(create("TextLabel", {
+						AnchorPoint = Vector2.new(1, 0),
+						Position = UDim2.new(1, 0, 0, 0),
+						Size = UDim2.new(0, 36, 1, 0),
+						BackgroundTransparency = 1,
+						Text = "OFF",
+						Font = Enum.Font.Code,
+						TextSize = 11,
+						TextXAlignment = Enum.TextXAlignment.Right,
+					}, line), { TextColor3 = "SubTextDim" })
+				end
+				local row = { chip = chip, state = stateLabel, active = false }
+				KeybindTool.hudRows[entry] = row
+				KeybindTool.paintHudRow(row, entry.get and entry.get() or false)
 			end
 		end
+		-- Aucune touche assignee : pas de panneau vide a l'ecran.
+		KeybindTool.hudFrame.BackgroundTransparency = count > 0 and 0.2 or 1
+		if KeybindTool.hudStroke then KeybindTool.hudStroke.Enabled = count > 0 end
+		local pad = KeybindTool.hudFrame:FindFirstChildWhichIsA("UIPadding") or create("UIPadding", {}, KeybindTool.hudFrame)
+		local p = UDim.new(0, count > 0 and 8 or 0)
+		pad.PaddingTop, pad.PaddingBottom, pad.PaddingLeft, pad.PaddingRight = p, p, UDim.new(0, count > 0 and 10 or 0), UDim.new(0, count > 0 and 10 or 0)
 	end
 
 	task.spawn(function()
@@ -4152,8 +4382,7 @@ do
 			task.wait(0.2)
 			if KeybindTool.hudFrame.Visible then
 				for entry, row in pairs(KeybindTool.hudRows) do
-					local active = entry.get and entry.get()
-					row.TextColor3 = active and Theme.Accent or Color3.new(1, 1, 1)
+					KeybindTool.paintHudRow(row, (entry.get and entry.get()) and true or false)
 				end
 			end
 		end
@@ -4161,41 +4390,44 @@ do
 end
 
 local function addButtonRow(content, text, onClick)
-	local Button = Skin.paint(create("TextButton", {
-		Size = UDim2.new(1, 0, 0, 32),
+	-- Pilule pleine largeur, voile neutre ; seul le clic la colore (flash accent).
+	local Button = Skin.veil(create("TextButton", {
+		Size = UDim2.new(1, 0, 0, 38),
 		Text = text,
 		Font = Enum.Font.GothamBold,
-		TextSize = 15,
+		TextSize = 14,
 		AutoButtonColor = false,
-	}, content), { BackgroundColor3 = "Element", TextColor3 = "Text" })
-	corner(Button, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, Button), { Color = "Stroke" })
+	}, content), 0.9)
+	Skin.paint(Button, { TextColor3 = "Text" })
+	Skin.round(Button)
 	local buttonScale = create("UIScale", { Scale = 1 }, Button) -- petit effet d'appui (scale), independant du pivot du bouton
 	MenuChrome.track(Button, text)
 
 	local hovering = false
 	Button.MouseEnter:Connect(function()
 		hovering = true
-		tween(Button, { BackgroundColor3 = Theme.ElementHover }, 0.1)
+		Skin.ease(Button, { BackgroundTransparency = Skin.A.Hover }, 0.12)
 	end)
 	Button.MouseLeave:Connect(function()
 		hovering = false
-		tween(Button, { BackgroundColor3 = Theme.Element }, 0.1)
+		Skin.ease(Button, { BackgroundTransparency = 0.9 }, 0.12)
 	end)
 
 	Button.MouseButton1Click:Connect(function()
 		-- Flash a l'accent puis retour : le seul moment ou un bouton se colore.
 		Button.BackgroundColor3 = Theme.Accent
+		Button.BackgroundTransparency = 0
 		Button.TextColor3 = Theme.OnAccent
-		tween(buttonScale, { Scale = 0.97 }, 0.08)
+		Skin.ease(buttonScale, { Scale = 0.97 }, 0.08)
 		task.delay(0.08, function()
-			tween(buttonScale, { Scale = 1 }, 0.12)
+			Skin.ease(buttonScale, { Scale = 1 }, 0.2, Enum.EasingStyle.Back)
 		end)
 		task.delay(0.12, function()
-			tween(Button, {
-				BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element,
+			Skin.ease(Button, {
+				BackgroundColor3 = Theme.Text,
+				BackgroundTransparency = hovering and Skin.A.Hover or 0.9,
 				TextColor3 = Theme.Text,
-			}, 0.15)
+			}, 0.25)
 		end)
 		if onClick then onClick() end
 	end)
@@ -4504,6 +4736,171 @@ do
 	end
 
 	do
+		-- Panneau "Hors de portee" : liste les joueurs dont le personnage
+		-- n'est pas charge chez nous. Le jeu est en StreamingEnabled : au-dela
+		-- de ~1300 studs Roblox decharge les personnages des autres (Parent =
+		-- nil), l'ESP n'a plus de HumanoidRootPart ou accrocher son billboard.
+		-- Les PV restent en direct : le Humanoid du personnage detache
+		-- continue d'etre replique (verifie en jeu sur 30 min). La position,
+		-- elle, n'arrive plus : on garde la derniere vue tant qu'il etait
+		-- charge, avec son anciennete (ReplicatedStorage.Settings.<nom> et
+		-- Backpack ne contiennent pas de position non plus).
+		-- Etat et fonctions dans 2 tables (limite Luau de 200 registres).
+		local state = { cache = {}, gui = nil, list = nil, title = nil, rows = {} }
+		local M = {}
+
+		function M.build()
+			local gui = Instance.new("ScreenGui")
+			gui.Name = "VapelFarPanel"
+			gui.ResetOnSpawn = false
+			gui.DisplayOrder = 50
+			gui.Parent = PlayerGui
+
+			local card = Instance.new("Frame")
+			card.AnchorPoint = Vector2.new(1, 0)
+			card.Position = UDim2.new(1, -16, 0, 200)
+			card.Size = UDim2.new(0, 260, 0, 0)
+			card.AutomaticSize = Enum.AutomaticSize.Y
+			card.BackgroundColor3 = Theme.Background
+			card.BackgroundTransparency = 0.2
+			card.BorderSizePixel = 0
+			card.Parent = gui
+			Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+			local stroke = Instance.new("UIStroke", card)
+			stroke.Color = Theme.Text
+			stroke.Transparency = 0.86
+			local pad = Instance.new("UIPadding", card)
+			pad.PaddingTop = UDim.new(0, 8)
+			pad.PaddingBottom = UDim.new(0, 8)
+			pad.PaddingLeft = UDim.new(0, 10)
+			pad.PaddingRight = UDim.new(0, 10)
+			local layout = Instance.new("UIListLayout", card)
+			layout.SortOrder = Enum.SortOrder.LayoutOrder
+			layout.Padding = UDim.new(0, 2)
+
+			local title = Instance.new("TextLabel")
+			title.BackgroundTransparency = 1
+			title.Size = UDim2.new(1, 0, 0, 18)
+			title.Font = Enum.Font.GothamBold
+			title.TextSize = 13
+			title.TextXAlignment = Enum.TextXAlignment.Left
+			title.TextColor3 = Theme.Accent
+			title.LayoutOrder = 0
+			title.Parent = card
+
+			state.gui, state.list, state.title, state.rows = gui, card, title, {}
+		end
+
+		function M.row(i)
+			local label = state.rows[i]
+			if not label then
+				label = Instance.new("TextLabel")
+				label.BackgroundTransparency = 1
+				label.Size = UDim2.new(1, 0, 0, 16)
+				label.Font = Enum.Font.Gotham
+				label.TextSize = 12
+				label.RichText = true
+				label.TextXAlignment = Enum.TextXAlignment.Left
+				label.TextColor3 = Theme.Text
+				label.LayoutOrder = i
+				label.Parent = state.list
+				state.rows[i] = label
+			end
+			return label
+		end
+
+		function M.age(seconds)
+			if seconds < 60 then return string.format("%ds", seconds) end
+			return string.format("%dm%02d", seconds // 60, seconds % 60)
+		end
+
+		function M.update()
+			local now = os.clock()
+			local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local far = {}
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					local character = player.Character
+					local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+					local root = character and character.Parent and character:FindFirstChild("HumanoidRootPart")
+					if root and humanoid then
+						state.cache[player] = { hp = humanoid.Health, maxHp = humanoid.MaxHealth, pos = root.Position, t = now }
+					else
+						-- Les PV du Humanoid detache continuent d'etre repliques
+						-- en direct (verifie : regen et degats recus pendant 30 min
+						-- sur un perso decharge). Seule la position reste celle
+						-- de la derniere fois qu'il etait charge.
+						local entry = state.cache[player]
+						if humanoid then
+							entry = { hp = humanoid.Health, maxHp = humanoid.MaxHealth, pos = entry and entry.pos, t = entry and entry.t }
+						end
+						table.insert(far, { player = player, entry = entry })
+					end
+				end
+			end
+			for player in pairs(state.cache) do
+				if player.Parent ~= Players then state.cache[player] = nil end
+			end
+
+			local show = Settings.EspFarPanel and FeatureState.enabled and #far > 0 and not unloaded
+			if not show then
+				if state.gui then state.gui.Enabled = false end
+				return
+			end
+			if not (state.gui and state.gui.Parent) then M.build() end
+			state.gui.Enabled = true
+
+			-- Plus recemment vus en premier, jamais vus a la fin.
+			table.sort(far, function(a, b)
+				return ((a.entry and a.entry.t) or -1) > ((b.entry and b.entry.t) or -1)
+			end)
+			state.title.Text = string.format("Hors de portee (%d)  -  PV en direct", #far)
+
+			local maxRows = 14
+			for i, item in ipairs(far) do
+				if i > maxRows then break end
+				local entry = item.entry
+				local text = "<b>" .. item.player.Name .. "</b>"
+				if entry and entry.maxHp and entry.maxHp > 0 then
+					local ratio = math.clamp(entry.hp / entry.maxHp, 0, 1)
+					local color = string.format("#%02X%02X28",
+						math.floor(255 * math.min(1, 2 * (1 - ratio))), math.floor(255 * math.min(1, 2 * ratio)))
+					text = text .. string.format("  <font color=\"%s\">%d/%d</font>", color, math.floor(entry.hp + 0.5), math.floor(entry.maxHp + 0.5))
+				end
+				if entry and entry.pos and myRoot then
+					text = text .. string.format("  ~%dm", math.floor((entry.pos - myRoot.Position).Magnitude))
+				end
+				if entry and entry.t then
+					text = text .. "  <font color=\"#8C8C8C\">(pos. il y a " .. M.age(math.floor(now - entry.t)) .. ")</font>"
+				else
+					text = text .. "  <font color=\"#8C8C8C\">(position inconnue)</font>"
+				end
+				local label = M.row(i)
+				label.Text = text
+				label.Visible = true
+			end
+			for i = math.min(#far, maxRows) + 1, #state.rows do
+				state.rows[i].Visible = false
+			end
+		end
+
+		task.spawn(function()
+			while not unloaded do
+				pcall(M.update)
+				task.wait(0.5)
+			end
+			if state.gui then pcall(function() state.gui:Destroy() end) end
+		end)
+
+		local FarSection = addSection(VisualsPage, "ESP Hors de portee")
+		FEATURE_CONTROLS.EspFarPanel = addToggleRow(FarSection, "Panneau joueurs hors de portee", Settings.EspFarPanel, function(value)
+			Settings.EspFarPanel = value
+			pcall(M.update)
+		end)
+		attachTooltip(FEATURE_CONTROLS.EspFarPanel.Row, "Avec ESP Actif : liste les joueurs trop loin pour etre charges par le jeu (~1300 studs), avec leurs PV en direct et leur derniere position connue (et son anciennete).")
+	end
+
+	do
 		local EnvSection = addSection(VisualsPage, "Environnement")
 
 		FEATURE_CONTROLS.NoFogEnabled = addToggleRow(EnvSection, "No Fog", FeatureState.NoFogEnabled, function(state)
@@ -4561,38 +4958,44 @@ do
 		local state = { rows = {} }
 		local M = {}
 
+		-- Les lignes sont des pilules cote a cote, centrees en haut de l'ecran.
 		local HudFrame = create("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
 			Position = UDim2.new(0.5, 0, 0, 10),
-			Size = UDim2.new(0, 520, 0, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
+			Size = UDim2.new(0, 900, 0, 30),
 			BackgroundTransparency = 1,
 		}, ScreenGui)
 		create("UIListLayout", {
-			Padding = UDim.new(0, 2),
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
 		}, HudFrame)
 
-		-- Contour noir plutot qu'un fond : lisible sur n'importe quel decor sans
-		-- poser un bandeau opaque en haut de l'ecran.
+		-- Pilule sombre semi-transparente, contour et texte de la couleur de la
+		-- ligne : lisible sur n'importe quel decor sans bandeau opaque.
 		function M.addRow(order, color)
 			local label = create("TextLabel", {
-				Size = UDim2.new(1, 0, 0, 26),
-				BackgroundTransparency = 1,
+				Size = UDim2.new(0, 0, 0, 30),
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundTransparency = 0.2,
+				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				TextSize = 22,
+				TextSize = 14,
 				TextColor3 = color,
 				Text = "",
 				Visible = false,
 				LayoutOrder = order,
 			}, HudFrame)
-			create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 2, Transparency = 0.25 }, label)
+			Skin.paint(label, { BackgroundColor3 = "Background" })
+			Skin.round(label)
+			create("UIStroke", { Color = color, Transparency = 0.55, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, label)
+			create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, label)
 			return label
 		end
 
-		state.rows.senseActive = M.addRow(1, Color3.fromRGB(255, 70, 70))
-		state.rows.senseOwners = M.addRow(2, Color3.fromRGB(80, 160, 255))
+		state.rows.senseActive = M.addRow(1, Color3.fromRGB(255, 143, 122))
+		state.rows.senseOwners = M.addRow(2, Color3.fromRGB(140, 190, 255))
 		state.rows.nearest = M.addRow(3, Color3.new(1, 1, 1))
 
 		function M.countSenseActive()
@@ -5495,16 +5898,17 @@ do
 			gui.IgnoreGuiInset = true
 			gui.Parent = PlayerGui
 
-			local root = Skin.paint(create("Frame", {
-				Size = UDim2.new(0, 420, 0, 126),
-				Position = UDim2.new(0.5, -210, 0, 16),
-				BackgroundTransparency = 0.05,
-				ClipsDescendants = true,
+			gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+			-- Carte de verre en haut a droite (loin des toasts, centres, et du
+			-- HUD des raccourcis, a gauche). Toujours deplacable a la souris.
+			local root = create("Frame", {
+				Size = UDim2.new(0, 400, 0, 126),
+				Position = UDim2.new(1, -416, 0, 56),
 				Active = true,
 				Visible = false,
-			}, gui), { BackgroundColor3 = "Background" })
-			corner(root, 5)
-			Skin.paint(create("UIStroke", { Transparency = 0 }, root), { Color = "Stroke" })
+			}, gui)
+			Skin.glass(root, Skin.R.Window, 0.12)
 
 			-- Draggable partout sur le panneau, meme mecanique que la fenetre
 			-- principale (voir "Drag de la fenetre" plus haut dans le
@@ -5529,104 +5933,93 @@ do
 				end)
 			end
 
-			-- Bandeau : point d'etat + titre a gauche, phase a droite. Les deux
-			-- prennent la couleur de la phase (STAGE_COLORS), c'est le seul
-			-- endroit colore du HUD.
-			local bandeau = Skin.paint(create("Frame", {
-				Size = UDim2.new(1, 0, 0, 32),
-			}, root), { BackgroundColor3 = "Panel" })
-			Skin.paint(create("Frame", {
-				Position = UDim2.new(0, 0, 1, -1),
-				Size = UDim2.new(1, 0, 0, 1),
-				BorderSizePixel = 0,
-			}, bandeau), { BackgroundColor3 = "Stroke" })
-
+			-- Ligne du haut : point d'etat (avec halo) + "AUTO BOSS" a gauche,
+			-- pastille de phase a droite. Point et pastille prennent la couleur
+			-- de la phase (STAGE_COLORS), c'est le seul endroit colore du HUD.
 			local statusDot = Skin.paint(create("Frame", {
 				AnchorPoint = Vector2.new(0, 0.5),
-				Position = UDim2.new(0, 10, 0.5, 0),
-				Size = UDim2.new(0, 7, 0, 7),
+				Position = UDim2.new(0, 18, 0, 26),
+				Size = UDim2.new(0, 8, 0, 8),
 				BorderSizePixel = 0,
-			}, bandeau), { BackgroundColor3 = "SubText" })
-			corner(statusDot, 4)
+			}, root), { BackgroundColor3 = "SubText" })
+			Skin.round(statusDot)
+			Skin.paint(create("UIStroke", { Thickness = 3, Transparency = 0.75 }, statusDot), { Color = "SubText" })
 
 			Skin.paint(create("TextLabel", {
-				Position = UDim2.new(0, 24, 0, 0),
-				Size = UDim2.new(0.5, 0, 1, 0),
+				Position = UDim2.new(0, 34, 0, 16),
+				Size = UDim2.new(0.5, 0, 0, 20),
 				BackgroundTransparency = 1,
 				Text = "AUTO BOSS",
-				Font = Enum.Font.Code,
-				TextSize = 13,
+				Font = Enum.Font.GothamBold,
+				TextSize = 12,
 				TextXAlignment = Enum.TextXAlignment.Left,
-			}, bandeau), { TextColor3 = "SubText" })
+			}, root), { TextColor3 = "SubText" })
 
 			local stageLabel = Skin.paint(create("TextLabel", {
 				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, -10, 0, 0),
-				Size = UDim2.new(0.5, -12, 1, 0),
-				BackgroundTransparency = 1,
+				Position = UDim2.new(1, -16, 0, 14),
+				Size = UDim2.new(0, 0, 0, 24),
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundTransparency = Skin.A.Tint,
+				BorderSizePixel = 0,
 				Font = Enum.Font.Code,
-				TextSize = 13,
-				TextXAlignment = Enum.TextXAlignment.Right,
-			}, bandeau), { TextColor3 = "Accent" })
+				TextSize = 11,
+			}, root), { TextColor3 = "Accent", BackgroundColor3 = "Accent" })
+			Skin.round(stageLabel)
+			create("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, stageLabel)
 
-			-- Nom du boss et PV sur la MEME ligne : c'est ce qui fait tomber la
-			-- hauteur totale, les deux se lisent d'un seul coup d'oeil.
+			-- Nom du boss et PV sur la MEME ligne : les deux se lisent d'un
+			-- seul coup d'oeil.
 			local bossLabel = Skin.paint(create("TextLabel", {
-				Position = UDim2.new(0, 12, 0, 40),
-				Size = UDim2.new(1, -142, 0, 22),
+				Position = UDim2.new(0, 18, 0, 44),
+				Size = UDim2.new(1, -160, 0, 24),
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				TextSize = 17,
+				Font = Enum.Font.GothamBlack,
+				TextSize = 19,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextTruncate = Enum.TextTruncate.AtEnd,
 			}, root), { TextColor3 = "Text" })
 
 			local hpText = Skin.paint(create("TextLabel", {
 				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, -12, 0, 40),
-				Size = UDim2.new(0, 122, 0, 22),
+				Position = UDim2.new(1, -18, 0, 46),
+				Size = UDim2.new(0, 136, 0, 22),
 				BackgroundTransparency = 1,
 				Text = "-- / --",
 				Font = Enum.Font.Code,
-				TextSize = 14,
+				TextSize = 13,
 				TextXAlignment = Enum.TextXAlignment.Right,
 			}, root), { TextColor3 = "Text" })
 
-			-- Barre de vie : 6 px au lieu de 22, le texte est passe au-dessus.
-			-- Le remplissage vire Danger sous 25 % (comportement conserve) pour
-			-- reperer la fenetre de Grip d'un coup d'oeil.
-			local hpBarBack = Skin.paint(create("Frame", {
-				Position = UDim2.new(0, 12, 0, 68),
-				Size = UDim2.new(1, -24, 0, 6),
-			}, root), { BackgroundColor3 = "Stroke" })
-			corner(hpBarBack, 3)
+			-- Barre de vie 10 px. Le remplissage vire Danger sous 25 %
+			-- (comportement conserve) pour reperer la fenetre de Grip.
+			local hpBarBack = Skin.veil(create("Frame", {
+				Position = UDim2.new(0, 18, 0, 74),
+				Size = UDim2.new(1, -36, 0, 10),
+			}, root), Skin.A.Track)
+			Skin.round(hpBarBack)
 			local hpBarFill = Skin.paint(create("Frame", {
 				Size = UDim2.new(0, 0, 1, 0),
-			}, hpBarBack), { BackgroundColor3 = "Accent" })
-			corner(hpBarFill, 3)
-
-			Skin.paint(create("Frame", {
-				Position = UDim2.new(0, 12, 0, 88),
-				Size = UDim2.new(1, -24, 0, 1),
 				BorderSizePixel = 0,
-			}, root), { BackgroundColor3 = "Stroke" })
+			}, hpBarBack), { BackgroundColor3 = "Accent" })
+			Skin.round(hpBarFill)
 
 			Skin.paint(create("TextLabel", {
-				Position = UDim2.new(0, 12, 0, 95),
-				Size = UDim2.new(0, 56, 0, 20),
+				Position = UDim2.new(0, 18, 0, 94),
+				Size = UDim2.new(0, 60, 0, 18),
 				BackgroundTransparency = 1,
 				Text = "RAISON",
-				Font = Enum.Font.Code,
-				TextSize = 12,
+				Font = Enum.Font.GothamBold,
+				TextSize = 11,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}, root), { TextColor3 = "SubTextDim" })
 
 			local reasonLabel = Skin.paint(create("TextLabel", {
-				Position = UDim2.new(0, 74, 0, 95),
-				Size = UDim2.new(1, -86, 0, 20),
+				Position = UDim2.new(0, 78, 0, 94),
+				Size = UDim2.new(1, -96, 0, 18),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamMedium,
-				TextSize = 15,
+				TextSize = 14,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextTruncate = Enum.TextTruncate.AtEnd,
 			}, root), { TextColor3 = "SubText" })
@@ -5658,8 +6051,10 @@ do
 
 			hud.StageLabel.Text = string.upper(tostring(stageText))
 			local token = STAGE_COLORS[stageText] or "SubText"
-			Skin.paint(hud.StageLabel, { TextColor3 = token })
+			Skin.paint(hud.StageLabel, { TextColor3 = token, BackgroundColor3 = token })
 			Skin.paint(hud.StatusDot, { BackgroundColor3 = token })
+			local halo = hud.StatusDot:FindFirstChildWhichIsA("UIStroke")
+			if halo then Skin.paint(halo, { Color = token }) end
 			-- Une raison presente pendant une phase d'alerte (Paused/Panic) est
 			-- la vraie information a lire : elle passe en Danger comme la phase.
 			Skin.paint(hud.ReasonLabel, { TextColor3 = (not quiet and token == "Danger") and "Danger" or "SubText" })
@@ -7245,9 +7640,11 @@ do
 			if value then
 				local gaaraControl = FEATURE_CONTROLS.AutoGaaraEnabled
 				if gaaraControl and gaaraControl.Get() then gaaraControl.Set(false) end
+				local powderControl = FEATURE_CONTROLS.AutoPowderEnabled
+				if powderControl and powderControl.Get() then powderControl.Set(false) end
 				M.switchMode(nil)
 				M.start()
-			elseif not state.questBoss then
+			elseif not state.questBoss and not state.powder then
 				M.stop()
 			end
 		end)
@@ -7298,6 +7695,8 @@ do
 				if value then
 					local bossControl = FEATURE_CONTROLS.AutoBossEnabled
 					if bossControl and bossControl.Get() then bossControl.Set(false) end
+					local powderControl = FEATURE_CONTROLS.AutoPowderEnabled
+					if powderControl and powderControl.Get() then powderControl.Set(false) end
 					M.switchMode("Gaara")
 					M.start()
 				elseif state.questBoss then
@@ -7306,6 +7705,280 @@ do
 				end
 			end)
 			attachTooltip(FEATURE_CONTROLS.AutoGaaraEnabled.Row, "Lance la quete Gourd Mastery chez Gaara, le combat (Shukaku compris), rend la quete et s'arrete. Utilise les reglages d'Auto Boss. Le Scream (rayon 125) s'esquive au Safe Spot : en definir un a plus de 130 studs de Gaara, au sol.")
+		end
+
+		-- Auto Golden Powder : farm des Golden Desertoid du parkour de Gaara
+		-- (workspace.GaaraParkour.Buttons.GaaraButtonN), avec le moteur d'Auto
+		-- Boss (accroche au-dessus, M1, Panic Heal, pause Chakra Sense).
+		-- Tout verifie en live via Potassium (2026-10-19) :
+		--   - bouton : DataEvent:FireServer("ActivateButton", <Model du bouton>),
+		--     exactement ce que fait le clic du jeu (portee client 30 studs).
+		--     Activated (BoolValue) passe a true tant que la vague tourne.
+		--   - vague : 6 "Golden Desertoid" (140 PV) dans les ~50 studs du bouton,
+		--     chacun avec l'attribut <NomDuBouton> = true (ex: GaaraButton4).
+		--   - drop : "Golden Switchpowder", 30 % par mob (GameManager.NPC). Ce
+		--     n'est PAS le systeme Pickupable/ID du loot des boss : une Part avec
+		--     un ClickDetector "ItemDetector" (portee 12), un script serveur
+		--     "PickUp" et un StringValue au nom du joueur proprietaire. Ramasse
+		--     par fireclickdetector a ~5 studs (teste : l'item part aussitot).
+		-- Un seul local (P) pour la limite des 200 registres.
+		do
+			local P = { token = 0, button = nil }
+
+			function P.findButton()
+				local character = LocalPlayer.Character
+				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+				local parkour = workspace:FindFirstChild("GaaraParkour")
+				local buttons = parkour and parkour:FindFirstChild("Buttons")
+				if not (rootPart and buttons) then return nil end
+				local best, bestDistance = nil, 300
+				for _, button in ipairs(buttons:GetChildren()) do
+					local part = button:FindFirstChild("ActivationButton")
+					if part and button:FindFirstChild("Activated") then
+						local distance = (part.Position - rootPart.Position).Magnitude
+						if distance < bestDistance then best, bestDistance = button, distance end
+					end
+				end
+				return best
+			end
+
+			-- Mobs vivants de CE bouton (attribut au nom du bouton).
+			function P.mobs(button)
+				local list = {}
+				for _, model in ipairs(workspace:GetChildren()) do
+					if model:IsA("Model") and model:GetAttribute(button.Name) == true then
+						local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+						if humanoid and humanoid.Health > 0 and M.getBossAnchor(model) then
+							table.insert(list, model)
+						end
+					end
+				end
+				return list
+			end
+
+			-- Nos drops au sol autour du bouton (StringValue a notre nom).
+			function P.drops(button)
+				local list = {}
+				local center = button.ActivationButton.Position
+				for _, obj in ipairs(workspace:GetChildren()) do
+					if obj:IsA("BasePart") and obj:FindFirstChild(LocalPlayer.Name) then
+						local detector = obj:FindFirstChild("ItemDetector")
+						if detector and detector:IsA("ClickDetector") and (obj.Position - center).Magnitude < 250 then
+							table.insert(list, obj)
+						end
+					end
+				end
+				return list
+			end
+
+			function P.collect(button)
+				local collected, attempts = 0, {}
+				local deadline = os.clock() + 30
+				while os.clock() < deadline do
+					local pending = {}
+					for _, item in ipairs(P.drops(button)) do
+						if (attempts[item] or 0) < 3 then table.insert(pending, item) end
+					end
+					if #pending == 0 then break end
+					for _, item in ipairs(pending) do
+						local character = LocalPlayer.Character
+						local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+						if not rootPart then return collected end
+						M.teleportRootPart(rootPart, item.Position + Vector3.new(0, 3, 0))
+						task.wait(0.1)
+						attempts[item] = (attempts[item] or 0) + 1
+						pcall(fireclickdetector, item.ItemDetector)
+						task.wait(0.35)
+						if not item.Parent then collected = collected + 1 end
+					end
+				end
+				return collected
+			end
+
+			function P.stop()
+				P.token = P.token + 1
+				if state.powder then
+					state.powder = false
+					M.stop()
+				end
+			end
+
+			function P.start()
+				if not fireclickdetector then
+					notify("Executeur sans fireclickdetector : impossible de ramasser la Golden Powder.", "error")
+					return false
+				end
+				local button = P.findButton()
+				if not button then
+					notify("Aucun bouton du parkour de Gaara a moins de 300 studs. Va pres du bouton (GaaraButton) puis relance.", "error")
+					return false
+				end
+				local canM1, performM1 = M.getCombatFns()
+				if not (canM1 and performM1) then
+					notify("Impossible de recuperer les fonctions de combat (canM1/performM1).", "error")
+					return false
+				end
+
+				-- Prend la main sur le moteur partage : le token coupe une boucle
+				-- Auto Boss/Gaara qui tournerait encore.
+				M.switchMode(nil)
+				state.token = state.token + 1
+				state.enabled = true
+				state.powder = true
+				P.token = P.token + 1
+				local myToken, engineToken = P.token, state.token
+				P.button = button
+				M.watchHealth()
+				M.ensureHud().Root.Visible = true
+				M.setHudState("Golden Desertoid", button.Name, "Waiting")
+				if Settings.AutoEquipWeaponEnabled then M.equipCurrentWeapon() end
+
+				task.spawn(function()
+					local wave, target, lastMobSeen = false, nil, 0
+					local totalPowder, waves = 0, 0
+					local paused, resumeAt = false, nil
+					local function alive()
+						return P.token == myToken and state.token == engineToken and state.powder and not unloaded
+					end
+					while alive() do
+						local character = LocalPlayer.Character
+						local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+						local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+						local healthPercent = (humanoid and humanoid.MaxHealth > 0) and humanoid.Health / humanoid.MaxHealth * 100 or 100
+						local panic = Settings.PanicHealEnabled and healthPercent <= Settings.PanicHealThreshold
+						local threat = ChakraSenseThreat.bossPauseReason()
+
+						if not rootPart then
+							task.wait(0.5)
+						elseif panic or threat or (paused and os.clock() < (resumeAt or math.huge)) then
+							-- Apres la fin de la menace, 2 s encore au Safe Spot
+							-- (comme Auto Boss) : sans ca, quelqu'un qui allume et
+							-- coupe Chakra Sense nous faisait faire l'aller-retour
+							-- bouton <-> Safe Spot toutes les secondes.
+							if panic or threat then
+								resumeAt = nil
+							elseif not resumeAt then
+								resumeAt = os.clock() + 2
+							end
+							if state.attached then M.detach() end
+							target = nil
+							if not paused then
+								paused = true
+								notify((panic and "PV bas" or threat) .. " - pause Auto Golden Powder, retour au Safe Spot.", "error")
+								teleportToSafeSpot()
+							end
+							M.holdSafeSpot()
+							M.setHudState("Golden Desertoid", panic and string.format("PV bas (%d%%)", math.floor(healthPercent)) or threat or "Reprise...", (panic or threat) and "Paused" or "Resuming")
+							task.wait(0.3)
+						else
+							if paused then
+								paused = false
+								resumeAt = nil
+								notify("Reprise de l'Auto Golden Powder.", "success")
+							end
+							if Settings.AutoEquipWeaponEnabled then M.reassertWeapon() end
+							local mobs = P.mobs(button)
+							if #mobs > 0 then
+								wave = true
+								lastMobSeen = os.clock()
+								-- Garde la cible tant qu'elle vit, sinon la plus proche.
+								local keep = false
+								for _, mob in ipairs(mobs) do
+									if mob == target then keep = true break end
+								end
+								if not keep then
+									local best, bestDistance = nil, math.huge
+									for _, mob in ipairs(mobs) do
+										local distance = (M.getBossAnchor(mob).Position - rootPart.Position).Magnitude
+										if distance < bestDistance then best, bestDistance = mob, distance end
+									end
+									if state.attached then M.detach() end
+									target = best
+									M.attachTo(target, { attachOffset = Vector3.new(0, Settings.AutoPowderHeight, 0) })
+								end
+								M.setHudState("Golden Desertoid", #mobs .. " restant(s)", "Attacking")
+								if not M.isDodging() and M.comboReady() then
+									local ok, canAttack = pcall(canM1)
+									if ok and canAttack then pcall(performM1) end
+								end
+							else
+								if state.attached then M.detach() end
+								target = nil
+								if wave then
+									-- Le drop arrive avec la mort du mob (un mob a 0 PV
+									-- est deja exclu de P.mobs) : 2.5 s de calme avant de
+									-- ramasser, en tenant la position pres du bouton.
+									M.setHudState("Golden Desertoid", "Fin de vague", "Looting")
+									if os.clock() - lastMobSeen > 2.5 then
+										local got = P.collect(button)
+										totalPowder = totalPowder + got
+										waves = waves + 1
+										wave = false
+										notify(string.format("Vague %d : %d Golden Switchpowder (total %d).", waves, got, totalPowder), "success")
+									else
+										M.teleportRootPart(rootPart, button.ActivationButton.Position + Vector3.new(0, 4, 0))
+									end
+								elseif #P.drops(button) > 0 then
+									-- Drops restes d'une vague precedente (pause, relance).
+									totalPowder = totalPowder + P.collect(button)
+								elseif button.Activated.Value == false then
+									M.setHudState("Golden Desertoid", button.Name, "Spawning")
+									M.teleportRootPart(rootPart, button.ActivationButton.Position + Vector3.new(0, 4, 0))
+									task.wait(0.2)
+									local DataEvent = M.getDataEvent()
+									if DataEvent then
+										pcall(function() DataEvent:FireServer("ActivateButton", button) end)
+									end
+									-- Laisse le temps aux mobs d'apparaitre avant de
+									-- reconsiderer (evite de re-appuyer en boucle).
+									local waitUntil = os.clock() + 5
+									while alive() and os.clock() < waitUntil and #P.mobs(button) == 0 do
+										task.wait(0.2)
+									end
+								else
+									-- Bouton deja actif sans nos mobs : vague d'un autre
+									-- joueur ou temps de recharge. On attend a cote.
+									M.setHudState("Golden Desertoid", "Bouton occupe/recharge", "Waiting")
+									M.teleportRootPart(rootPart, button.ActivationButton.Position + Vector3.new(0, 4, 0))
+									task.wait(1)
+								end
+							end
+						end
+						task.wait(0.1)
+					end
+					if P.token == myToken then
+						local control = FEATURE_CONTROLS.AutoPowderEnabled
+						task.defer(function()
+							if control and control.Get() then control.Set(false) end
+						end)
+						P.stop()
+					end
+				end)
+				return true
+			end
+
+			local AutoPowderSection = addSection(AutoPage, "Auto Golden Powder")
+			FEATURE_CONTROLS.AutoPowderEnabled = addToggleRow(AutoPowderSection, "Auto Golden Powder", Settings.AutoPowderEnabled, function(value)
+				Settings.AutoPowderEnabled = value
+				if value then
+					local bossControl = FEATURE_CONTROLS.AutoBossEnabled
+					if bossControl and bossControl.Get() then bossControl.Set(false) end
+					local gaaraControl = FEATURE_CONTROLS.AutoGaaraEnabled
+					if gaaraControl and gaaraControl.Get() then gaaraControl.Set(false) end
+					if not P.start() then
+						task.defer(function()
+							local control = FEATURE_CONTROLS.AutoPowderEnabled
+							if control and control.Get() then control.Set(false) end
+						end)
+					end
+				else
+					P.stop()
+				end
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderEnabled.Row, "A lancer pres d'un bouton du parkour de Gaara : appuie, tue les Golden Desertoid par au-dessus, ramasse les Golden Switchpowder (30 % par mob) et recommence. Utilise Panic Heal, la pause Chakra Sense et Auto Equip Weapon d'Auto Boss.")
+			FEATURE_CONTROLS.AutoPowderHeight = addSliderRow(AutoPowderSection, "Hauteur au-dessus des mobs (studs)", 3, 15, Settings.AutoPowderHeight, 1, function(v)
+				Settings.AutoPowderHeight = v
+			end)
 		end
 	end
 
@@ -9342,17 +10015,14 @@ do
 
 		local BuySection = addSection(AutresPage, "Acheter")
 
-		local ItemNameBox = Skin.paint(create("TextBox", {
+		local ItemNameBox = Skin.field(create("TextBox", {
 			Size = UDim2.new(1, 0, 0, 30),
 			Text = "",
 			PlaceholderText = "Nom exact de l'item...",
 			Font = Enum.Font.GothamMedium,
 			TextSize = 14,
 			ClearTextOnFocus = false,
-		}, BuySection), { BackgroundColor3 = "Element", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
-		corner(ItemNameBox, 3)
-		Skin.paint(create("UIStroke", { Transparency = 0 }, ItemNameBox), { Color = "Stroke" })
-		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, ItemNameBox)
+		}, BuySection))
 
 		addDropdownRow(BuySection, "Choisir dans la liste", BUYABLE_ITEM_NAMES, nil, function(v)
 			ItemNameBox.Text = v
@@ -9389,11 +10059,11 @@ do
 		-- Etat + fonctions regroupes dans deux tables plutot qu'en locals
 		-- separes, pour rester large sur les registres (voir note en tete de
 		-- fichier).
-		-- listConn / targetConn : connexions qu'on doit pouvoir COUPER nous-memes,
-		-- pas seulement au unload - la liste du jeu est reconstruite a chaque
-		-- respawn et la cible peut changer de personnage. Les garder ici evite
-		-- d'empiler des connexions mortes sur des instances detruites.
-		local state = { enabled = false, currentTarget = nil, connected = {}, listConn = nil, targetConn = nil }
+		-- listConn : connexion qu'on doit pouvoir COUPER nous-memes, pas
+		-- seulement au unload - la liste du jeu est reconstruite a chaque
+		-- respawn. La garder ici evite d'empiler des connexions mortes sur des
+		-- instances detruites. waiting : cible choisie mais pas chargee.
+		local state = { enabled = false, currentTarget = nil, waiting = false, connected = {}, listConn = nil }
 		local M = {}
 
 		function M.findPlayerByDisplayText(text)
@@ -9405,12 +10075,26 @@ do
 			return nil
 		end
 
+		-- Humanoid de la cible SEULEMENT si son personnage est vraiment charge
+		-- chez nous. Le jeu est en StreamingEnabled : au-dela de ~1300 studs,
+		-- Roblox decharge le personnage des autres joueurs (Parent = nil, souvent
+		-- sans HumanoidRootPart) mais Player.Character continue de le designer.
+		-- L'ancien code ne testait que la presence du Humanoid : il pointait la
+		-- camera sur ce personnage decharge et l'image restait figee sur rien,
+		-- d'ou le "le spectate ne marche plus". RequestStreamAroundAsync ne
+		-- ramene pas les personnages (verifie en jeu), seul le "observe" du jeu
+		-- (Chakra Sense) le fait, et il pose BeingObservedBy sur la cible.
+		function M.loadedHumanoid(player)
+			local character = player.Character
+			if not (character and character.Parent and character:FindFirstChild("HumanoidRootPart")) then
+				return nil
+			end
+			return character:FindFirstChildWhichIsA("Humanoid")
+		end
+
 		function M.stopSpectating()
 			state.currentTarget = nil
-			if state.targetConn then
-				state.targetConn:Disconnect()
-				state.targetConn = nil
-			end
+			state.waiting = false
 			local character = LocalPlayer.Character
 			local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 			if humanoid then
@@ -9418,29 +10102,45 @@ do
 			end
 		end
 
+		-- La cible est retenue meme si elle n'est pas chargee : la boucle
+		-- ci-dessous bascule la camera des qu'elle arrive a portee, et revient
+		-- sur nous si elle sort de portee ou meurt (au lieu de rester figee).
 		function M.spectate(player)
-			local humanoid = player.Character and player.Character:FindFirstChildWhichIsA("Humanoid")
-			if not humanoid then
-				notify(player.Name .. " n'a pas de personnage charge.", "error")
-				return
-			end
-			workspace.CurrentCamera.CameraSubject = humanoid
 			state.currentTarget = player
-
-			-- La cible va mourir tot ou tard : son Humanoid est alors detruit et
-			-- la camera retombe toute seule sur nous, alors que state.currentTarget
-			-- continue de la designer. Sans ce reaccrochage, on ne suivait plus
-			-- rien ET recliquer sur ce joueur appelait stopSpectating (on croyait
-			-- deja le spectate) au lieu de le reprendre.
-			if state.targetConn then state.targetConn:Disconnect() end
-			state.targetConn = player.CharacterAdded:Connect(function(character)
-				if state.currentTarget ~= player then return end
-				local newHumanoid = character:WaitForChild("Humanoid", 10)
-				if newHumanoid and state.currentTarget == player then
-					workspace.CurrentCamera.CameraSubject = newHumanoid
-				end
-			end)
+			state.waiting = false
+			local humanoid = M.loadedHumanoid(player)
+			if humanoid then
+				workspace.CurrentCamera.CameraSubject = humanoid
+			else
+				state.waiting = true
+				notify(player.Name .. " est trop loin, le jeu ne l'a pas charge. Spectate auto des qu'il est a portee (~1300 studs).", "error")
+			end
 		end
+
+		task.spawn(function()
+			while not unloaded do
+				task.wait(0.5)
+				local target = state.currentTarget
+				if target then
+					local camera = workspace.CurrentCamera
+					local humanoid = M.loadedHumanoid(target)
+					if humanoid then
+						if camera.CameraSubject ~= humanoid then
+							camera.CameraSubject = humanoid
+						end
+						if state.waiting then
+							state.waiting = false
+							notify("Spectate : " .. target.Name .. " est a portee.", "success")
+						end
+					elseif not state.waiting then
+						state.waiting = true
+						local myHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+						if myHumanoid then camera.CameraSubject = myHumanoid end
+						notify("Spectate : " .. target.Name .. " hors de portee, reprise auto quand il revient.", "error")
+					end
+				end
+			end
+		end)
 
 		function M.getPlayerListFrame()
 			local clientGui = PlayerGui:FindFirstChild("ClientGui")
@@ -9622,13 +10322,13 @@ end
 --------------------------------------------------------------------------------
 
 local function addConfigRow(container, name, isDefault, onLoad, onSetDefault, onDelete)
-	local Row = Skin.paint(create("Frame", { Size = UDim2.new(1, 0, 0, 56) }, container), { BackgroundColor3 = "Element" })
-	corner(Row, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, Row), { Color = "Stroke" })
+	local Row = Skin.veil(create("Frame", { Size = UDim2.new(1, 0, 0, 64) }, container), Skin.A.Card)
+	Skin.round(Row, 12)
+	Skin.edge(Row, 0.93)
 
 	Skin.paint(create("TextLabel", {
-		Position = UDim2.new(0, 10, 0, 6),
-		Size = UDim2.new(1, -20, 0, 18),
+		Position = UDim2.new(0, 14, 0, 8),
+		Size = UDim2.new(1, -28, 0, 20),
 		BackgroundTransparency = 1,
 		Text = isDefault and (name .. "  \226\152\133 par defaut") or name,
 		Font = Enum.Font.GothamBold,
@@ -9638,8 +10338,8 @@ local function addConfigRow(container, name, isDefault, onLoad, onSetDefault, on
 	}, Row), { TextColor3 = isDefault and "Accent" or "Text" })
 
 	local ButtonsHolder = create("Frame", {
-		Position = UDim2.new(0, 10, 0, 27),
-		Size = UDim2.new(1, -20, 0, 23),
+		Position = UDim2.new(0, 14, 0, 32),
+		Size = UDim2.new(1, -28, 0, 24),
 		BackgroundTransparency = 1,
 	}, Row)
 	create("UIListLayout", {
@@ -9652,26 +10352,27 @@ local function addConfigRow(container, name, isDefault, onLoad, onSetDefault, on
 	-- OnAccent), "danger" pour la destructrice (contour et texte rouges, jamais
 	-- de rouge plein - ca attirerait l'oeil plus que Charger), nil pour le
 	-- neutre (contour gris). La couleur n'apparait que la ou l'action compte.
+	-- Pilules : accent plein (principale), voile (neutre), teinte rouge
+	-- (destructrice, jamais de rouge plein).
 	local function miniButton(text, kind)
 		local Btn = Skin.paint(create("TextButton", {
 			Size = UDim2.new(0, 0, 1, 0),
 			AutomaticSize = Enum.AutomaticSize.X,
-			BackgroundTransparency = kind == "filled" and 0 or 1,
+			BackgroundTransparency = kind == "filled" and 0 or (kind == "danger" and Skin.A.Tint or 0.9),
+			BorderSizePixel = 0,
 			Text = text,
-			Font = Enum.Font.GothamMedium,
+			Font = Enum.Font.GothamBold,
 			TextSize = 12,
 			AutoButtonColor = false,
 		}, ButtonsHolder), {
-			BackgroundColor3 = "Accent",
-			TextColor3 = kind == "filled" and "OnAccent" or (kind == "danger" and "Danger" or "SubText"),
+			BackgroundColor3 = kind == "filled" and "Accent" or (kind == "danger" and "Danger" or "Text"),
+			TextColor3 = kind == "filled" and "OnAccent" or (kind == "danger" and "Danger" or "Text"),
 		})
-		corner(Btn, 3)
-		if kind ~= "filled" then
-			Skin.paint(create("UIStroke", { Transparency = 0 }, Btn), {
-				Color = kind == "danger" and "Danger" or "StrokeStrong",
-			})
-		end
-		create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, Btn)
+		Skin.round(Btn)
+		create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, Btn)
+		local rest = Btn.BackgroundTransparency
+		Btn.MouseEnter:Connect(function() Skin.ease(Btn, { BackgroundTransparency = math.max(0, rest - (kind == "filled" and 0 or 0.08)) }, 0.12) end)
+		Btn.MouseLeave:Connect(function() Skin.ease(Btn, { BackgroundTransparency = rest }, 0.12) end)
 		return Btn
 	end
 
@@ -9683,17 +10384,14 @@ end
 do
 	local ConfigSection = addSection(SettingsPage, "Configs")
 
-	local ConfigNameBox = Skin.paint(create("TextBox", {
+	local ConfigNameBox = Skin.field(create("TextBox", {
 		Size = UDim2.new(1, 0, 0, 30),
 		Text = "",
 		PlaceholderText = "Nom de la config...",
 		Font = Enum.Font.GothamMedium,
 		TextSize = 14,
 		ClearTextOnFocus = false,
-	}, ConfigSection), { BackgroundColor3 = "Element", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
-	corner(ConfigNameBox, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, ConfigNameBox), { Color = "Stroke" })
-	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, ConfigNameBox)
+	}, ConfigSection))
 	attachTooltip(ConfigNameBox, "Enregistre tes reglages actuels sous ce nom, marque-en une par defaut pour la recharger au demarrage.")
 
 	local ConfigListContainer = create("Frame", {
@@ -9869,6 +10567,83 @@ end
 		addLabelRow(TeleportSection, "queue_on_teleport indisponible sur cet executeur.")
 	end
 
+	-- Changer de serveur / rejoindre le meme. Liste des serveurs publics via
+	-- l'API Roblox (request de l'executeur : HttpGet vers roblox.com peut etre
+	-- bloque), puis TeleportService:TeleportToPlaceInstance, autorise cote
+	-- client. Un seul local (H) pour la limite des 200 registres.
+	local H = { busy = false }
+
+	function H.fetchServers()
+		local servers, cursor = {}, nil
+		for _ = 1, 3 do
+			local url = "https://games.roblox.com/v1/games/" .. game.PlaceId
+				.. "/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100"
+				.. (cursor and ("&cursor=" .. cursor) or "")
+			local ok, response = pcall(request, { Url = url, Method = "GET" })
+			if not (ok and response and response.StatusCode == 200) then break end
+			local okDecode, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+			if not (okDecode and type(data) == "table" and type(data.data) == "table") then break end
+			for _, server in ipairs(data.data) do
+				-- 2 places libres minimum : un serveur a une place peut se remplir
+				-- pendant le teleport et le refuser.
+				if server.id ~= game.JobId and type(server.playing) == "number"
+					and type(server.maxPlayers) == "number" and server.playing <= server.maxPlayers - 2 then
+					table.insert(servers, server)
+				end
+			end
+			cursor = data.nextPageCursor
+			if not cursor or #servers >= 30 then break end
+		end
+		return servers
+	end
+
+	-- Retourne true si le teleport est lance (le client quitte alors le serveur).
+	function H.hop()
+		if H.busy then return false end
+		if not request then
+			notify("Executeur sans request : impossible de lister les serveurs.", "error")
+			return false
+		end
+		H.busy = true
+		local servers = H.fetchServers()
+		if #servers == 0 then
+			H.busy = false
+			notify("Aucun autre serveur avec de la place trouve.", "error")
+			return false
+		end
+		local server = servers[math.random(1, #servers)]
+		notify(string.format("Changement de serveur (%d/%d joueurs)...", server.playing, server.maxPlayers), "success")
+		armTeleportQueue()
+		local ok, err = pcall(function()
+			game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+		end)
+		if not ok then
+			notify("Teleport refuse : " .. tostring(err), "error")
+		end
+		-- Echec asynchrone (serveur plein entre-temps...) : on relache le verrou
+		-- au bout de 15 s pour pouvoir reessayer.
+		task.delay(15, function() H.busy = false end)
+		return ok
+	end
+
+	function H.rejoin()
+		armTeleportQueue()
+		local ok, err = pcall(function()
+			game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+		end)
+		if not ok then notify("Rejoin refuse : " .. tostring(err), "error") end
+	end
+
+	-- Expose pour les autres features (hop auto de l'Auto Golden Powder) via
+	-- l'espace global de l'executeur, comme __VonClient : un local a la racine
+	-- couterait un registre (voir la note des 200 registres).
+	((getgenv and getgenv()) or _G).__VonHop = H.hop
+
+	attachTooltip(addButtonRow(TeleportSection, "Changer de serveur", H.hop),
+		"Te teleporte sur un autre serveur public du jeu, choisi au hasard parmi ceux qui ont au moins 2 places libres.")
+	attachTooltip(addButtonRow(TeleportSection, "Rejoindre le meme serveur", H.rejoin),
+		"Quitte et revient sur ce serveur-ci.")
+
 	-- Rearme des le chargement : c'est ce qui fait tenir les hops enchaines.
 	armTeleportQueue()
 end
@@ -9876,7 +10651,7 @@ end
 do
 	local WebhookSection = addSection(SettingsPage, "Webhook Discord")
 
-	local WebhookUrlBox = Skin.paint(create("TextBox", {
+	local WebhookUrlBox = Skin.field(create("TextBox", {
 		Size = UDim2.new(1, 0, 0, 30),
 		Text = Prefs.InventoryWebhookUrl or "",
 		PlaceholderText = "https://discord.com/api/webhooks/...",
@@ -9885,10 +10660,7 @@ do
 		ClearTextOnFocus = false,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextXAlignment = Enum.TextXAlignment.Left,
-	}, WebhookSection), { BackgroundColor3 = "Element", TextColor3 = "Text", PlaceholderColor3 = "SubTextDim" })
-	corner(WebhookUrlBox, 3)
-	Skin.paint(create("UIStroke", { Transparency = 0 }, WebhookUrlBox), { Color = "Stroke" })
-	create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, WebhookUrlBox)
+	}, WebhookSection))
 	attachTooltip(WebhookUrlBox, "Utilise par l'envoi auto d'inventaire (page Auto > Envoi Auto Inventaire).")
 
 	addButtonRow(WebhookSection, "Enregistrer le webhook", function()
@@ -9960,25 +10732,23 @@ end
 -- ligne construite a la main plutot que par un add*Row.
 local SessionSection = addSection(SettingsPage, "Session", true)
 local UnloadButton = MenuChrome.track(Skin.paint(create("TextButton", {
-	Size = UDim2.new(1, 0, 0, 30),
-	BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 38),
+	BackgroundTransparency = Skin.A.Tint,
+	BorderSizePixel = 0,
 	Text = "Decharger le script",
 	Font = Enum.Font.GothamBold,
-	TextSize = 15,
+	TextSize = 14,
 	AutoButtonColor = false,
 }, SessionSection), { BackgroundColor3 = "Danger", TextColor3 = "Danger" }), "Decharger le script")
-corner(UnloadButton, 3)
-Skin.paint(create("UIStroke", { Transparency = 0 }, UnloadButton), { Color = "Danger" })
+Skin.round(UnloadButton)
 local unloadScale = create("UIScale", { Scale = 1 }, UnloadButton)
--- Contour rouge au repos, rouge plein au survol : visible sans hurler dans une
+-- Teinte rouge au repos, rouge plein au survol : visible sans hurler dans une
 -- page ou tout le reste est neutre.
 UnloadButton.MouseEnter:Connect(function()
-	UnloadButton.BackgroundTransparency = 0
-	tween(UnloadButton, { TextColor3 = Theme.OnAccent }, 0.1)
+	Skin.shift(UnloadButton, { TextColor3 = "OnAccent" }, { BackgroundTransparency = 0 }, 0.12)
 end)
 UnloadButton.MouseLeave:Connect(function()
-	UnloadButton.BackgroundTransparency = 1
-	tween(UnloadButton, { TextColor3 = Theme.Danger }, 0.1)
+	Skin.shift(UnloadButton, { TextColor3 = "Danger" }, { BackgroundTransparency = Skin.A.Tint }, 0.12)
 end)
 UnloadButton.MouseButton1Click:Connect(function()
 	tween(unloadScale, { Scale = 0.97 }, 0.08)
