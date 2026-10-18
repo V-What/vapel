@@ -494,6 +494,9 @@ local DEFAULT_FEATURES = {
 	HudSenseActive = true,
 	HudSenseOwners = true,
 	HudNearest = true,
+	-- ESP Boss (page Visuels > ESP Boss)
+	EspBossEnabled = false,
+	EspBossDistance = true,
 	AntiFallDamage = false,
 	NoKillBricks = false,
 	-- Attach to Back : studs SOUS la cible. Seule la distance est persistee, la
@@ -4350,6 +4353,154 @@ do
 				end
 			end
 		end)
+	end
+
+	do
+		-- ESP Boss : barre + PV au-dessus de chaque boss present dans workspace,
+		-- independant de l'ESP joueurs (pas besoin de "ESP Actif"). Etat et
+		-- fonctions regroupes en 2 tables (limite Luau de 200 registres).
+		-- Liste de noms dupliquee volontairement : BOSS_CONFIGS est local au
+		-- bloc Auto Boss, construit plus bas.
+		local state = {
+			names = {
+				["Tairock"] = true, ["Lavarossa"] = true, ["Chakra Knight"] = true,
+				["Barbarit The Rose"] = true, ["Hyuga Boss"] = true, ["Manda"] = true,
+				["Lava Snake"] = true, ["Wooden Golem"] = true, ["The Ringed Samurai"] = true,
+				["Gaara"] = true, ["Shukaku"] = true,
+			},
+			tags = {}, -- [model] = { gui, root, nameLabel, fill, hpLabel }
+		}
+		local M = {}
+
+		function M.clear(model)
+			local tag = state.tags[model]
+			if tag then
+				state.tags[model] = nil
+				pcall(function() tag.gui:Destroy() end)
+			end
+		end
+
+		function M.create(model, root)
+			local scale = getEspScale()
+			local height = 4
+			pcall(function() height = model:GetExtentsSize().Y / 2 + 1.5 end)
+
+			local gui = Instance.new("BillboardGui")
+			gui.Name = "VapelBossHp"
+			gui.Adornee = root
+			gui.Size = UDim2.new(0, 200 * scale, 0, 38 * scale)
+			gui.StudsOffsetWorldSpace = Vector3.new(0, height, 0)
+			gui.AlwaysOnTop = true
+			gui.LightInfluence = 0
+			gui.Parent = root
+
+			local nameLabel = Instance.new("TextLabel")
+			nameLabel.BackgroundTransparency = 1
+			nameLabel.Size = UDim2.new(1, 0, 0, 16 * scale)
+			nameLabel.Font = Enum.Font.GothamBold
+			nameLabel.TextSize = 14 * scale
+			nameLabel.TextColor3 = Color3.fromRGB(255, 175, 70)
+			nameLabel.TextStrokeTransparency = 0.4
+			nameLabel.Text = model.Name
+			nameLabel.Parent = gui
+
+			local bar = Instance.new("Frame")
+			bar.Position = UDim2.new(0, 0, 0, 18 * scale)
+			bar.Size = UDim2.new(1, 0, 0, 18 * scale)
+			bar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+			bar.BackgroundTransparency = 0.25
+			bar.BorderSizePixel = 0
+			bar.Parent = gui
+
+			local fill = Instance.new("Frame")
+			fill.Size = UDim2.new(1, 0, 1, 0)
+			fill.BorderSizePixel = 0
+			fill.Parent = bar
+
+			local hpLabel = Instance.new("TextLabel")
+			hpLabel.BackgroundTransparency = 1
+			hpLabel.Size = UDim2.new(1, 0, 1, 0)
+			hpLabel.Font = Enum.Font.GothamBold
+			hpLabel.TextSize = 13 * scale
+			hpLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+			hpLabel.TextStrokeTransparency = 0.3
+			hpLabel.ZIndex = 2
+			hpLabel.Parent = bar
+
+			local tag = { gui = gui, root = root, nameLabel = nameLabel, fill = fill, hpLabel = hpLabel }
+			state.tags[model] = tag
+			return tag
+		end
+
+		function M.update()
+			local seen = {}
+			if Settings.EspBossEnabled and not unloaded then
+				local myChar = LocalPlayer.Character
+				local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+				for _, model in ipairs(workspace:GetChildren()) do
+					if state.names[model.Name] and model:IsA("Model") then
+						local humanoid = model:FindFirstChildOfClass("Humanoid")
+						local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+						-- PNJ de dialogue (Gaara de quete hors combat) : ignore.
+						local npcValue = model:FindFirstChild("NPC")
+						local isDialog = npcValue and npcValue:IsA("ValueBase") and npcValue.Value == "Dialog"
+						if humanoid and root and humanoid.Health > 0 and not isDialog then
+							seen[model] = true
+							local tag = state.tags[model]
+							if not tag or tag.root ~= root or not tag.gui.Parent then
+								M.clear(model)
+								tag = M.create(model, root)
+							end
+
+							local maxHp = math.max(humanoid.MaxHealth, 1)
+							local ratio = math.clamp(humanoid.Health / maxHp, 0, 1)
+							tag.fill.Size = UDim2.new(ratio, 0, 1, 0)
+							-- Vert -> jaune -> rouge selon les PV restants.
+							tag.fill.BackgroundColor3 = Color3.fromRGB(
+								math.floor(255 * math.min(1, 2 * (1 - ratio))),
+								math.floor(255 * math.min(1, 2 * ratio)),
+								40
+							)
+
+							local settingsFolder = model:FindFirstChild("Settings")
+							local invincibleValue = settingsFolder and settingsFolder:FindFirstChild("Invincible")
+							local invincible = invincibleValue and invincibleValue:IsA("BoolValue") and invincibleValue.Value
+							tag.hpLabel.Text = string.format("%d / %d  (%d%%)%s",
+								math.floor(humanoid.Health + 0.5), math.floor(maxHp + 0.5),
+								math.floor(ratio * 100 + 0.5), invincible and "  INVINCIBLE" or "")
+
+							local nameText = model.Name
+							if Settings.EspBossDistance and myRoot then
+								nameText = string.format("%s  -  %d studs", nameText, math.floor((root.Position - myRoot.Position).Magnitude))
+							end
+							tag.nameLabel.Text = nameText
+						end
+					end
+				end
+			end
+			for model in pairs(state.tags) do
+				if not seen[model] then M.clear(model) end
+			end
+		end
+
+		task.spawn(function()
+			while not unloaded do
+				pcall(M.update)
+				task.wait(0.15)
+			end
+			pcall(M.update) -- unloaded : retire les billboards restants
+		end)
+
+		local BossEspSection = addSection(VisualsPage, "ESP Boss")
+		FEATURE_CONTROLS.EspBossEnabled = addToggleRow(BossEspSection, "PV des Boss", Settings.EspBossEnabled, function(value)
+			Settings.EspBossEnabled = value
+			pcall(M.update)
+		end)
+		attachTooltip(FEATURE_CONTROLS.EspBossEnabled.Row, "Barre + PV au-dessus des boss (Auto Boss + Shukaku), visible a travers les murs. Fonctionne sans ESP Actif. Gaara de quete en mode dialogue ignore.")
+		FEATURE_CONTROLS.EspBossDistance = addToggleRow(BossEspSection, "Afficher Distance", Settings.EspBossDistance, function(value)
+			Settings.EspBossDistance = value
+		end)
+		attachTooltip(FEATURE_CONTROLS.EspBossDistance.Row, "Ajoute la distance en studs a cote du nom du boss.")
 	end
 
 	do
