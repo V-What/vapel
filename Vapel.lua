@@ -484,7 +484,8 @@ local DEFAULT_FEATURES = {
 	AutoBossEnabled = false,
 	AutoGaaraEnabled = false,
 	AutoPowderEnabled = false,
-	AutoPowderHeight = 6,
+	AutoPowderHeight = 8,
+	AutoPowderEquipWeapon = false,
 	-- Desactive par defaut : apres un hop direct, le serveur peut ne jamais
 	-- repondre a InvokeServer("LoadedIn") (menu bloque, constate 2 fois sur 4).
 	AutoPowderHop = false,
@@ -7747,7 +7748,7 @@ do
 			-- chargement, donc apres un hop "Server Hop si pris" retombait a
 			-- false et le farm attendait au lieu de re-hopper (constate). Relues
 			-- ICI, avant la creation des toggles qui lisent Settings.
-			P.OPTION_KEYS = { "AutoPowderHop", "AutoPowderSkipNearby", "AutoPowderSkipRadius", "AutoPowderHeight" }
+			P.OPTION_KEYS = { "AutoPowderHop", "AutoPowderSkipNearby", "AutoPowderSkipRadius", "AutoPowderHeight", "AutoPowderEquipWeapon" }
 			if type(Prefs.AutoPowderOptions) == "table" then
 				for _, key in ipairs(P.OPTION_KEYS) do
 					if Prefs.AutoPowderOptions[key] ~= nil then Settings[key] = Prefs.AutoPowderOptions[key] end
@@ -7909,7 +7910,7 @@ do
 				M.watchHealth()
 				M.ensureHud().Root.Visible = true
 				M.setHudState("Golden Desertoid", P.BUTTON_NAME, "Waiting")
-				if Settings.AutoEquipWeaponEnabled then M.equipCurrentWeapon() end
+				if Settings.AutoPowderEquipWeapon then M.equipCurrentWeapon() end
 
 				task.spawn(function()
 					local wave, target, lastMobSeen = false, nil, 0
@@ -7961,7 +7962,7 @@ do
 								resumeAt = nil
 								notify("Reprise de l'Auto Golden Powder.", "success")
 							end
-							if Settings.AutoEquipWeaponEnabled then M.reassertWeapon() end
+							if Settings.AutoPowderEquipWeapon then M.reassertWeapon() end
 							-- Bouton absent (premier tour, ou decharge pendant une
 							-- pause au Safe Spot) : on y va et on le fait charger.
 							if not (button and button.Parent and button:FindFirstChild("ActivationButton")) then
@@ -8125,7 +8126,7 @@ do
 					P.stop()
 				end
 			end)
-			attachTooltip(FEATURE_CONTROLS.AutoPowderEnabled.Row, "Se teleporte au bouton du parkour de Gaara, l'active, tue les Golden Desertoid par au-dessus, ramasse les Golden Switchpowder (30 % par mob) et recommence. Reste actif apres un server hop ou un rechargement. Utilise Panic Heal, la pause Chakra Sense et Auto Equip Weapon d'Auto Boss.")
+			attachTooltip(FEATURE_CONTROLS.AutoPowderEnabled.Row, "Se teleporte au bouton du parkour de Gaara, l'active, tue les Golden Desertoid par au-dessus, ramasse les Golden Switchpowder (30 % par mob) et recommence. Reste actif apres un server hop ou un rechargement. Utilise le Panic Heal et la pause Chakra Sense d'Auto Boss.")
 			FEATURE_CONTROLS.AutoPowderHop = addToggleRow(AutoPowderSection, "Server Hop si le bouton est deja pris", Settings.AutoPowderHop, function(value)
 				Settings.AutoPowderHop = value
 				P.saveOptions()
@@ -8144,6 +8145,15 @@ do
 				Settings.AutoPowderHeight = v
 				P.saveOptions()
 			end)
+			-- Meme mecanique qu'Auto Equip Weapon d'Auto Boss (M.equipCurrentWeapon
+			-- au demarrage, M.reassertWeapon a chaque tour), mais reglage propre au
+			-- farm et sauvegarde avec ses autres options.
+			FEATURE_CONTROLS.AutoPowderEquipWeapon = addToggleRow(AutoPowderSection, "Auto Equip Weapon", Settings.AutoPowderEquipWeapon, function(value)
+				Settings.AutoPowderEquipWeapon = value
+				P.saveOptions()
+				if value and state.powder then M.equipCurrentWeapon() end
+			end)
+			attachTooltip(FEATURE_CONTROLS.AutoPowderEquipWeapon.Row, "Reequipe ton arme actuelle (CurrentWeapon) au demarrage du farm et la remet en main si elle saute.")
 
 			-- Reprise apres un server hop / rechargement (voir P.resumeOnLoad).
 			-- Petit delai : le reste du menu finit de se construire.
