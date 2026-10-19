@@ -6850,8 +6850,8 @@ do
 		-- ReplicatedStorage.Settings.<joueur>.SubCooldown (timestamp serveur
 		-- du dernier Sub) compare a GameManager.Settings.SubCooldown (duree)
 		-- via workspace:GetServerTimeNow(), comme le fait le vrai client -
-		-- evite de spammer le remote pour rien pendant le cooldown. Retraite
-		-- vers le haut (on est deja cense etre au-dessus du boss) plutot
+		-- evite de spammer le remote pour rien pendant le cooldown.
+		-- Retraite a 15 studs derriere (meme formule que le jeu, voir plus bas) plutot
 		-- qu'une direction aleatoire. Reduit les degats au lieu de les
 		-- annuler completement, donc ne remplace pas un bon positionnement -
 		-- filet de securite en plus, comme demande.
@@ -6869,7 +6869,11 @@ do
 				if elapsed < (GameManager.Settings.SubCooldown or 0) then return end
 			end
 
-			local escapePosition = (rootPart.CFrame * CFrame.new(0, 15, 0)).Position
+			-- Meme formule que le client du jeu sans mouvement (new_data1 :
+			-- HumanoidRootPart.CFrame * CFrame.new(0, 0, 15), sinon +-15 en X) :
+			-- un point a 15 studs DERRIERE, jamais au-dessus. L'ancien (0, 15, 0)
+			-- etait une valeur qu'un vrai client n'envoie jamais.
+			local escapePosition = (rootPart.CFrame * CFrame.new(0, 0, 15)).Position
 			pcall(function()
 				DataEvent:FireServer("Dash", "Sub", escapePosition)
 			end)
