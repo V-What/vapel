@@ -5915,6 +5915,12 @@ do
 
 		function M.ensureHud()
 			if state.hud then return state.hud end
+			-- HUD laisses par une instance precedente (rechargement de Vapel) :
+			-- l'unload ne les detruisait pas, ils s'empilaient avec leurs
+			-- dernieres valeurs figees (constate : 3 HUD superposes).
+			for _, old in ipairs(PlayerGui:GetChildren()) do
+				if old.Name == "VonClientAutoBossHud" then old:Destroy() end
+			end
 			local gui = Instance.new("ScreenGui")
 			gui.Name = "VonClientAutoBossHud"
 			gui.ResetOnSpawn = false
@@ -6293,10 +6299,12 @@ do
 		--     meme mecanique que Third Kazekage dans le client) - on laisse
 		--     tranquille le combat de quete d'un autre joueur.
 		function M.passesFilters(model, config)
-			if config.requireCombat then
-				local npcValue = model:FindFirstChild("NPC")
-				if npcValue and npcValue.Value == "Dialog" then return false end
-			end
+			-- PNJ en mode dialogue : jamais une cible, pour TOUS les boss (avant
+			-- seulement requireCombat). Depuis qu'on fait charger les zones des
+			-- boss (M.streamBossAreas), le Hyuga Boss de quete en "Dialog" est
+			-- visible et l'Auto Boss s'accrochait dessus sans faire de degats.
+			local npcValue = model:FindFirstChild("NPC")
+			if npcValue and npcValue:IsA("ValueBase") and npcValue.Value == "Dialog" then return false end
 			if config.requireAttribute and not model:GetAttribute(config.requireAttribute) then
 				return false
 			end
@@ -6366,6 +6374,47 @@ do
 			return nil
 		end
 
+		-- Depuis la mise a jour du jeu (StreamingEnabled), les boss et leurs
+		-- modeles (recompenses, dalles d'invocation) ne sont PAS charges chez
+		-- nous quand on est loin, typiquement au Safe Spot : M.findBoss ne
+		-- trouvait jamais rien et l'Auto Boss restait sur "boss introuvable".
+		-- RequestStreamAroundAsync fait charger la zone (verifie en jeu :
+		-- Tairock et Hyuga Boss apparaissent aussitot). On le fait pour les
+		-- boss coches, au plus une fois toutes les 10 s.
+		-- Positions : lootWaitPosition de la config + points releves en jeu
+		-- (SpawnCF des boss, dalles spawnFloor, modeles de recompenses).
+		M.STREAM_POINTS = {
+			["Tairock"] = { Vector3.new(-121, -207, -1071) },
+			["Lavarossa"] = { Vector3.new(-559, -316, -192) },
+			["Barbarit The Rose"] = { Vector3.new(-1033, 257, -1629), Vector3.new(-1033, 260, -1414) },
+			["Hyuga Boss"] = { Vector3.new(-675, -359, -773) },
+			["Manda"] = { Vector3.new(1532, -538, 680) },
+			["Chakra Knight"] = { Vector3.new(2831, -126, -1153) },
+			["Wooden Golem"] = { Vector3.new(-4711, 335, -2941) },
+		}
+		state.lastStream = 0
+		function M.streamBossAreas()
+			local now = os.clock()
+			if now - state.lastStream < 10 then return end
+			state.lastStream = now
+			local seen = {}
+			for name, config in pairs(BOSS_CONFIGS) do
+				local wanted = state.questBoss and (name == state.questBoss or config.linkedTo == state.questBoss) or M.isSelected(name)
+				if wanted then
+					local points = {}
+					if config.lootWaitPosition then table.insert(points, config.lootWaitPosition) end
+					for _, point in ipairs(M.STREAM_POINTS[name] or {}) do table.insert(points, point) end
+					for _, point in ipairs(points) do
+						local key = math.floor(point.X / 50) .. "," .. math.floor(point.Z / 50)
+						if not seen[key] then
+							seen[key] = true
+							pcall(function() LocalPlayer:RequestStreamAroundAsync(point, 3) end)
+						end
+					end
+				end
+			end
+		end
+
 		function M.findBoss()
 			-- Tant qu'un boss est deja engage, NE JAMAIS se rabattre sur un
 			-- autre boss selectionne, meme si celui-ci vient de disparaitre
@@ -6397,6 +6446,7 @@ do
 				return M.findCurrentBoss()
 			end
 
+			M.streamBossAreas()
 			for name in pairs(BOSS_CONFIGS) do
 				local boss, config = M.findBossByName(name)
 				if boss then
