@@ -6804,7 +6804,7 @@ do
 							task.wait(0.1)
 							M.teleportRootPart(rootPart, item.Position)
 							pcall(function()
-								DataEvent:FireServer("PickUp", idValue.Value)
+								DataEvent:FireServer("PickUp", idValue.Value, 1)
 							end)
 							task.wait(0.25)
 
@@ -8601,7 +8601,7 @@ do
 				end
 				pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
 				task.wait(0.3)
-				pcall(function() dataFunction:InvokeServer("StartQuest", questName) end)
+				pcall(function() dataFunction:InvokeServer("StartQuest", questName, 1) end)
 				task.wait(0.4)
 				local progress = M.questProgress(dataFunction, questName)
 				if progress and not progress:find("^Start") then
@@ -8810,7 +8810,7 @@ do
 				-- Etape 1 : demarrage sur place, sans bouger.
 				pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
 				task.wait(0.3)
-				pcall(function() dataFunction:InvokeServer("StartQuest", questName) end)
+				pcall(function() dataFunction:InvokeServer("StartQuest", questName, 1) end)
 				task.wait(0.4)
 
 				local progress = M.questProgress(dataFunction, questName)
@@ -9006,7 +9006,7 @@ do
 							-- rien : on lisait l'etat sans jamais franchir l'etape.
 							pcall(function() dataFunction:InvokeServer("GetQuestProgress", questName) end)
 							task.wait(0.3)
-							pcall(function() dataFunction:InvokeServer("StartQuest", questName) end)
+							pcall(function() dataFunction:InvokeServer("StartQuest", questName, 1) end)
 							task.wait(0.5)
 
 							-- Lecture seule pour savoir ou on en est, la variante
@@ -9218,7 +9218,7 @@ do
 					or mine.Gripping.Value ~= "None" or mine.CurrentSkill.Value ~= ""
 			end)
 			if not ok or blocked then return false end
-			dataEvent:FireServer("CheckMeleeHit", "Ground", "HeavyAttack")
+			dataEvent:FireServer("CheckMeleeHit", "Ground", "HeavyAttack", nil, 1)
 			return true
 		end
 
@@ -9976,7 +9976,7 @@ do
 
 						if not state.suspended and M.canBlock(mine) and os.clock() - state.lastBlock > 1.5 then
 							state.lastBlock = os.clock()
-							pcall(function() dataFunction:InvokeServer("Block") end)
+							pcall(function() dataFunction:InvokeServer("Block", 1) end)
 						end
 						-- Le mensonge local, reaffirme a chaque tour : le serveur
 						-- repasse le drapeau a true a chaque garde accordee, et il
